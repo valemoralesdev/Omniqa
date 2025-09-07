@@ -1,0 +1,15 @@
+{
+    "snr_signal": 64.54,
+    "sdnr": 6.02,
+    "pixel_spacing_mm": 0.1,
+    "mtf_horizontal": {
+        "MTF@50%": 2.05,
+        "MTF@20%": 3.356,
+        "MTF@10%": 9.396
+    },
+    "mtf_vertical": {
+        "MTF@50%": 2.133,
+        "MTF@20%": 3.239,
+        "MTF@10%": 3.705
+    }
+}

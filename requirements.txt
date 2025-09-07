@@ -1,0 +1,10 @@
+Flask
+Flask-PyMongo
+Flask-JWT-Extended
+Flask-CORS
+python-dotenv
+pymongo
+pydicom
+opencv-python-headless
+numpy
+gunicorn
