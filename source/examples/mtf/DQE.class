@@ -1,0 +1,1197 @@
+package it.plugins.mammo.dqe;
+
+import ij.IJ;
+import ij.WindowManager;
+import ij.gui.Plot;
+import ij.gui.PlotWindow;
+import ij.measure.ResultsTable;
+import ij.plugin.PlugIn;
+import it.plugins.util.ExcelAdapter;
+import it.plugins.util.JTableUtilities;
+import it.plugins.util.Util;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.Image;
+import java.awt.Insets;
+import java.awt.LayoutManager;
+import java.awt.Toolkit;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.FocusEvent;
+import java.awt.event.FocusListener;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.awt.font.TextAttribute;
+import java.awt.image.BufferedImage;
+import java.net.URL;
+import java.text.AttributedString;
+import java.text.DecimalFormat;
+import java.text.NumberFormat;
+import java.text.ParseException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
+import javax.swing.DefaultCellEditor;
+import javax.swing.DefaultComboBoxModel;
+import javax.swing.ImageIcon;
+import javax.swing.InputVerifier;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
+import javax.swing.JFileChooser;
+import javax.swing.JFormattedTextField;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JMenuItem;
+import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JRadioButton;
+import javax.swing.JScrollPane;
+import javax.swing.JSlider;
+import javax.swing.JTable;
+import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import javax.swing.border.Border;
+import javax.swing.border.TitledBorder;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
+import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.table.JTableHeader;
+import javax.swing.table.TableCellRenderer;
+import manifold.internal.runtime.Bootstrap;
+import net.miginfocom.swing.MigLayout;
+import org.knowm.xchart.XChartPanel;
+import org.knowm.xchart.XYChart;
+import org.knowm.xchart.XYChartBuilder;
+import org.knowm.xchart.XYSeries;
+import org.knowm.xchart.internal.chartpart.Chart;
+import org.knowm.xchart.style.GGPlot2Theme;
+import org.knowm.xchart.style.Styler;
+import org.knowm.xchart.style.XYStyler;
+import org.knowm.xchart.style.markers.SeriesMarkers;
+import org.scilab.forge.jlatexmath.TeXFormula;
+import org.scilab.forge.jlatexmath.TeXIcon;
+
+public class DQE implements PlugIn {
+  private static String imageFileName = "/images/Blank.png";
+  
+  private static String imageBlankFileName = "/images/Blank.png";
+  
+  private static JFileChooser fc;
+  
+  JLabel picture;
+  
+  private Set<String> specialUnit = new HashSet<>();
+  
+  private DecimalFormat numberFormat;
+  
+  static {
+    Bootstrap.init();
+  }
+  
+  private String titleForDQE = "";
+  
+  private JComboBox iecList;
+  
+  private JComboBox eurefList;
+  
+  private JComboBox comboList;
+  
+  private JComboBox unitList;
+  
+  private JSlider kvSlider;
+  
+  private JTextField customTextField;
+  
+  private String[] iecValues = new String[] { "RQA-M1 (25 kV Mo/Mo (32 ", "RQA-M2 (28 kV Mo/Mo (32 , "RQA-M3 (30 kV Mo/Mo (32 , "RQA-M4 (35 kV Mo/Mo (32 , "28 kV Mo/Rh (25 , "28 kV Rh/Rh (25 , "28 kV W/Rh (50 , "28 kV W/Al (500 };
+  
+  private String[] iecSNR2in = new String[] { "4639", "4981", "5303", "6325", "5439", "5944", "5975", "6575" };
+  
+  private String[] eurefValues = new String[] { "Rh/Rh (25 - 29 kV", "W/Al (500 - 35 kV", "W/Ag (50 - 32 kV" };
+  
+  private String[] eurefSNR2in = new String[] { "6248", "8823", "7143" };
+  
+  private TreeSet<String> set2D = new TreeSet<>();
+  
+  private TreeMap<String, TreeSet<String>> map2D = new TreeMap<>();
+  
+  private TreeSet<String> set3D = new TreeSet<>();
+  
+  private TreeMap<String, TreeSet<String>> map3D = new TreeMap<>();
+  
+  private TreeSet<String> setUnits = new TreeSet<>();
+  
+  private TreeMap<String, TreeSet<String>> mapUnits = new TreeMap<>();
+  
+  private JTextField snr2inTextField;
+  
+  TreeMap<String, TreeSet<String>> mapCheckBoxes = this.mapUnits;
+  
+  private HashMap<String, String> mapIEC = new HashMap<>();
+  
+  private HashMap<String, String> mapEuref = new HashMap<>();
+  
+  private HashMap<String, String> mapLUT = new HashMap<>();
+  
+  double[] freq = null;
+  
+  double[] dqeFreq = null;
+  
+  double[] MTFvalues = null;
+  
+  double[] NNPSvalues = null;
+  
+  double[] DQEvalues = null;
+  
+  double MTF_binSize = 0.0D;
+  
+  double NNPS_binSize = 0.0D;
+  
+  private JButton buttonOK;
+  
+  double K = Double.NaN;
+  
+  private JLabel kLabel;
+  
+  private JTextField nnpsTextField;
+  
+  private JTextField mtfTextField;
+  
+  private int larghezzaSpettro;
+  
+  private int altezzaSpettro;
+  
+  private void setUpFormats() {
+    this.numberFormat = (DecimalFormat)NumberFormat.getNumberInstance();
+    this.numberFormat.setParseIntegerOnly(true);
+  }
+  
+  private void createSet2D() {
+    String pluginDir = IJ.getDirectory("plugins");
+    String workingDir = pluginDir + "\\MAMMO_QC\\";
+    String file = workingDir + "\\lista2D.txt";
+    String filestring = IJ.openAsString(file);
+    String[] righe = filestring.split("\n");
+    for (String riga : righe) {
+      String[] data = riga.split(";");
+      this.set2D.add(data[0]);
+      String[] combos = data[1].split(",");
+      TreeSet<String> comboSet = new TreeSet<>();
+      for (String combo : combos)
+        comboSet.add(combo.trim()); 
+      this.map2D.put(data[0], comboSet);
+    } 
+  }
+  
+  private void createSet3D() {
+    String pluginDir = IJ.getDirectory("plugins");
+    String workingDir = pluginDir + "\\MAMMO_QC\\";
+    String file = workingDir + "\\lista3D.txt";
+    String filestring = IJ.openAsString(file);
+    String[] righe = filestring.split("\n");
+    for (String riga : righe) {
+      String[] data = riga.split(";");
+      this.set3D.add(data[0]);
+      String[] combos = data[1].split(",");
+      TreeSet<String> comboSet = new TreeSet<>();
+      for (String combo : combos)
+        comboSet.add(combo.trim()); 
+      this.map3D.put(data[0], comboSet);
+    } 
+  }
+  
+  private void createLUT() {
+    String pluginDir = IJ.getDirectory("plugins");
+    String workingDir = pluginDir + "\\MAMMO_QC\\";
+    String file = workingDir + "\\LUT-mammo-units.txt";
+    String filestring = IJ.openAsString(file);
+    String[] righe = filestring.split("\n");
+    for (String riga : righe) {
+      String[] data = riga.split(",");
+      this.mapLUT.put(data[0], data[1]);
+    } 
+  }
+  
+  private void createListUnit() {
+    this.setUnits = new TreeSet<>();
+    this.setUnits.addAll(this.set2D);
+    this.setUnits.addAll(this.set3D);
+    TreeSet<String> set = new TreeSet<>();
+    TreeSet<String> set3D = new TreeSet<>();
+    TreeMap<String, TreeSet<String>> map = new TreeMap<>();
+    for (String key : this.setUnits) {
+      set = this.map2D.get(key);
+      set3D = this.map3D.get(key);
+      if (set3D != null)
+        set.addAll(set3D); 
+      map.put(key, set);
+    } 
+    this.mapUnits = map;
+  }
+  
+  private void createSpecialUnit() {
+    this.specialUnit.add("Hologic Lorad Selenia (new)");
+    this.specialUnit.add("Planmed Clarity 3D");
+    this.specialUnit.add("Philips MicroDose");
+  }
+  
+  private void createIECMap() {
+    for (int i = 0; i < this.iecValues.length; i++)
+      this.mapIEC.put(this.iecValues[i], this.iecSNR2in[i]); 
+  }
+  
+  private void createEurefMap() {
+    for (int i = 0; i < this.eurefValues.length; i++)
+      this.mapEuref.put(this.eurefValues[i], this.eurefSNR2in[i]); 
+  }
+  
+  private void onOK() {}
+  
+  private void onCancel() {}
+  
+  public static void main(String[] args) {}
+  
+  private void createUIComponents() {}
+  
+  protected void updateSpectrum(String name) {
+    String combo = (String)this.comboList.getSelectedItem();
+    String unit = (String)this.unitList.getSelectedItem();
+    String kVSelected = Integer.toString(this.kvSlider.getValue());
+    String imageName = combo.replaceAll("/", "");
+    String tooltiipText = "A drawning of " + combo + " specturm at " + kVSelected + " kV for the " + unit + " unit.";
+    imageName = imageName + kVSelected;
+    if (this.specialUnit.contains(unit))
+      switch (unit) {
+        case "Hologic Lorad Selenia (new)":
+          if (combo.equals("W/Rh") || combo.equals("W/Ag"))
+            imageName = imageName + "_60"; 
+          break;
+        case "Planmed Clarity 3D":
+          if (combo.equals("W/Ag")) {
+            imageName = imageName + "_75";
+            break;
+          } 
+          if (combo.equals("W/Rh"))
+            imageName = imageName + "_60"; 
+          break;
+        case "Philips MicroDose":
+          imageName = imageName + "_500";
+          break;
+      }  
+    imageFileName = "/images/" + imageName + ".png";
+    if (name != null)
+      imageFileName = name; 
+    ImageIcon icon = createImageIcon(imageFileName);
+    this.picture.setIcon(icon);
+    if (name == null)
+      this.picture.setToolTipText(tooltiipText); 
+    if (icon != null) {
+      this.picture.setText((String)null);
+    } else {
+      this.picture.setText("Image not found");
+    } 
+  }
+  
+  protected void updateSNR2in() throws ParseException {
+    String combo = (String)this.comboList.getSelectedItem();
+    String unit = (String)this.unitList.getSelectedItem();
+    String kVSelected = Integer.toString(this.kvSlider.getValue());
+    String key = unit + " " + combo + " - " + kVSelected + " kV";
+    String value = this.mapLUT.get(key);
+    this.snr2inTextField.setForeground(Color.BLACK);
+    int valueInt = this.numberFormat.parse(value).intValue();
+    this.snr2inTextField.setText(this.numberFormat.format(valueInt));
+  }
+  
+  protected void updateSNR2in(String value) {
+    this.snr2inTextField.setForeground(Color.BLACK);
+    int valueInt = 0;
+    try {
+      valueInt = this.numberFormat.parse(value).intValue();
+      this.snr2inTextField.setText(this.numberFormat.format(valueInt));
+      if (this.buttonOK != null)
+        if (!Double.isNaN(this.K))
+          this.buttonOK.setEnabled(true);  
+    } catch (ParseException e) {
+      this.snr2inTextField.setText("-----");
+      if (this.buttonOK != null)
+        this.buttonOK.setEnabled(false); 
+      this.snr2inTextField.setForeground(Color.LIGHT_GRAY);
+    } 
+  }
+  
+  protected ImageIcon createImageIcon(String path) {
+    Dimension screen = IJ.getScreenSize();
+    URL imgURL = DQE.class.getResource(path);
+    BufferedImage buf = null;
+    if (imgURL != null) {
+      ImageIcon imageIcon = new ImageIcon(imgURL);
+      Image image = imageIcon.getImage();
+      int altezza = this.altezzaSpettro;
+      Image newimg = image.getScaledInstance(this.larghezzaSpettro, altezza, 4);
+      imageIcon = new ImageIcon(newimg);
+      return imageIcon;
+    } 
+    System.err.println("Couldn't find file: " + path);
+    return null;
+  }
+  
+  private void createAndShowGUI() {
+    final Dimension screen = IJ.getScreenSize();
+    int larghezzaPannelli = (int)(0.8D * screen.width) - 50;
+    int larghezzaFinestra = (int)(0.9D * screen.width);
+    int altezzaFinestra = (int)(0.9D * screen.height);
+    this.altezzaSpettro = (int)(0.25D * screen.height);
+    this.larghezzaSpettro = (int)(0.7D * larghezzaPannelli);
+    createIECMap();
+    createEurefMap();
+    JFrame frame = new JFrame("Please make a choice...");
+    final JDialog dialog = new JDialog();
+    dialog.setTitle("DQE COMPUTATION");
+    JPanel contentPane = new JPanel((LayoutManager)new MigLayout("fillx"));
+    WindowManager.addWindow(dialog);
+    String latex = "DQE = \\frac{MTF^2}{SNR^{2}_{in}\\cdot NNPS \\cdot K}";
+    TeXFormula formula = new TeXFormula(latex);
+    TeXIcon icon = formula.createTeXIcon(0, 20.0F);
+    icon.setInsets(new Insets(5, 5, 5, 5));
+    BufferedImage image = new BufferedImage(icon.getIconWidth(), icon.getIconHeight(), 2);
+    Graphics2D g2 = image.createGraphics();
+    g2.setColor(Color.white);
+    g2.fillRect(0, 0, icon.getIconWidth(), icon.getIconHeight());
+    JLabel jl = new JLabel();
+    jl.setForeground(new Color(0, 0, 0));
+    icon.paintIcon(jl, g2, 0, 0);
+    ImageIcon dqeIcon = new ImageIcon(image);
+    JLabel titleLabel = new JLabel();
+    titleLabel.setIcon(dqeIcon);
+    contentPane.add(titleLabel, "alignx center, wrap");
+    JPanel measurementsPanel = new JPanel((LayoutManager)new MigLayout("fillx"));
+    TitledBorder measurementBorder = new TitledBorder("MTF/NNPS");
+    measurementsPanel.setBorder(measurementBorder);
+    measurementsPanel.setMinimumSize(new Dimension(larghezzaPannelli, 120));
+    JButton btnRESET = new JButton("Clear loaded MTF/NNPS");
+    final JButton btnMTF = new JButton("Select an MTF file...");
+    final JButton btnNNPS = new JButton("Select an NNPS file...");
+    this.mtfTextField = new JTextField(18);
+    this.mtfTextField.setText("no MTF file choosen");
+    this.nnpsTextField = new JTextField(18);
+    this.nnpsTextField.setText("no NNPS file choosen");
+    this.mtfTextField.setEditable(false);
+    this.nnpsTextField.setEditable(false);
+    btnMTF.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent actionEvent) {
+            if (DQE.fc == null) {
+              DQE.fc = new JFileChooser();
+              DQE.fc.setDialogTitle("Please select the csv file related to the MTF measurements");
+              DQE.fc.setFileSelectionMode(0);
+              DQE.fc.setAcceptAllFileFilterUsed(false);
+              DQE.fc.setFileFilter(new FileNameExtensionFilter("Comma separated value Files", new String[] { "csv" }));
+            } 
+            switch (DQE.fc.showOpenDialog(btnMTF)) {
+              case 0:
+                DQE.this.mtfTextField.setText(DQE.fc.getSelectedFile().getName());
+                try {
+                  DQE.this.updateMTF(ResultsTable.open2(DQE.fc.getSelectedFile().getPath()));
+                } catch (Exception e) {
+                  IJ.error("Something has gone WRONG - PLEASE RE-TRY !");
+                  DQE.this.mtfTextField.setText("no MTF file choosen");
+                } 
+                break;
+            } 
+          }
+        });
+    btnNNPS.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent actionEvent) {
+            if (DQE.fc == null) {
+              DQE.fc = new JFileChooser();
+              DQE.fc.setDialogTitle("Please select the csv file related to the NNPS measurements");
+              DQE.fc.setFileSelectionMode(0);
+              DQE.fc.setAcceptAllFileFilterUsed(false);
+              DQE.fc.setFileFilter(new FileNameExtensionFilter("Comma separated value Files", new String[] { "csv" }));
+            } 
+            switch (DQE.fc.showOpenDialog(btnNNPS)) {
+              case 0:
+                DQE.this.nnpsTextField.setText(DQE.fc.getSelectedFile().getName());
+                try {
+                  DQE.this.updateNNPS(ResultsTable.open2(DQE.fc.getSelectedFile().getPath()));
+                } catch (Exception e) {
+                  IJ.error("Something has gone WRONG - PLEASE RE-TRY !");
+                  DQE.this.nnpsTextField.setText("no NNPS file choosen");
+                } 
+                break;
+            } 
+          }
+        });
+    btnRESET.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent actionEvent) {
+            DQE.this.nnpsTextField.setText("no NNPS file choosen");
+            DQE.this.mtfTextField.setText("no MTF file choosen");
+            DQE.this.buttonOK.setEnabled(false);
+            DQE.this.MTFvalues = null;
+            DQE.this.NNPSvalues = null;
+            DQE.this.MTF_binSize = 0.0D;
+            DQE.this.NNPS_binSize = 0.0D;
+          }
+        });
+    this.kLabel = new JLabel("K (N/A ");
+    Font fontK = new Font("SansSerif", 1, 14);
+    this.kLabel.setFont(fontK);
+    measurementsPanel.add(btnRESET, "center,span 5, wrap");
+    measurementsPanel.add(btnMTF);
+    measurementsPanel.add(this.mtfTextField, "gapright 40");
+    measurementsPanel.add(btnNNPS);
+    measurementsPanel.add(this.nnpsTextField, "gapright 40");
+    measurementsPanel.add(this.kLabel, "gapright 30,wrap");
+    contentPane.add(measurementsPanel, "center,wrap");
+    JPanel snr2inPanel = new JPanel((LayoutManager)new MigLayout("fillx"));
+    AttributedString trig = new AttributedString("SNR);
+    trig.addAttribute(TextAttribute.FAMILY, "SansSerif");
+    trig.addAttribute(TextAttribute.SUPERSCRIPT, TextAttribute.SUPERSCRIPT_SUB, 4, 5);
+    TitledBorder snr2inBorder = new TitledBorder("SNR);
+    snr2inPanel.setBorder(snr2inBorder);
+    snr2inPanel.setPreferredSize(new Dimension(larghezzaPannelli, (int)(0.85D * altezzaFinestra)));
+    JLabel snrLabel = new JLabel("<html>SNR<sup>2</sup><sub>in</sub> (X-rays per per mm<sup>2</sup>): </html> ");
+    snrLabel.setFont(fontK);
+    JLabel snrComment = new JLabel("(for 2 mm Al external filtration)");
+    snrComment.setFont(fontK);
+    this.snr2inTextField = new JTextField(5);
+    this.snr2inTextField.setEditable(false);
+    Font font1 = new Font("SansSerif", 1, 20);
+    this.snr2inTextField.setFont(font1);
+    this.snr2inTextField.setHorizontalAlignment(0);
+    snr2inPanel.add(snrLabel, "alignx center, split3");
+    snr2inPanel.add(this.snr2inTextField, "alignx left");
+    snr2inPanel.add(snrComment, "alignx center, wrap");
+    final JPanel iecPanel = new JPanel();
+    iecPanel.setMinimumSize(new Dimension(larghezzaPannelli / 2, 75));
+    TitledBorder iecBorder = new TitledBorder("IEC 62220-1-2:2007 standard");
+    iecPanel.setBorder(iecBorder);
+    this.iecList = new JComboBox<>(this.iecValues);
+    this.iecList.setSelectedIndex(0);
+    JLabel iecLabel = new JLabel("Beam quality: ");
+    iecPanel.add(iecLabel, "left, span 2,split");
+    String item = (String)this.iecList.getSelectedItem();
+    String value = this.mapIEC.get(this.iecList.getSelectedItem());
+    updateSNR2in(value);
+    iecPanel.add(this.iecList, "left");
+    this.iecList.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent e) {
+            String key = (String)((JComboBox)e.getSource()).getSelectedItem();
+            DQE.this.snr2inTextField.setForeground(Color.BLACK);
+            DQE.this.updateSNR2in((String)DQE.this.mapIEC.get(key));
+          }
+        });
+    final JPanel eurefPanel = new JPanel();
+    eurefPanel.setMinimumSize(new Dimension(larghezzaPannelli / 2, 75));
+    TitledBorder eurefBorder = new TitledBorder("European Guidelines supplements");
+    eurefPanel.setBorder(eurefBorder);
+    JLabel eurefLabel = new JLabel("Beam quality: ");
+    this.eurefList = new JComboBox<>(this.eurefValues);
+    eurefPanel.add(eurefLabel, "left, span 2,split");
+    eurefPanel.add(this.eurefList, "left");
+    this.eurefList.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent e) {
+            String key = (String)((JComboBox)e.getSource()).getSelectedItem();
+            DQE.this.snr2inTextField.setForeground(Color.BLACK);
+            DQE.this.updateSNR2in((String)DQE.this.mapEuref.get(key));
+          }
+        });
+    final JPanel mammoPanel = new JPanel((LayoutManager)new MigLayout("fillx"));
+    mammoPanel.setMinimumSize(new Dimension(larghezzaPannelli, this.altezzaSpettro + 120));
+    TitledBorder mammoBorder = new TitledBorder("Commercially available units");
+    mammoPanel.setBorder(mammoBorder);
+    final JRadioButton ffdmButton = new JRadioButton("FFDM / 2D");
+    final JRadioButton tomoButton = new JRadioButton("TOMOSYNTHESIS");
+    JRadioButton allButton = new JRadioButton("All");
+    ButtonGroup group = new ButtonGroup();
+    group.add(ffdmButton);
+    group.add(tomoButton);
+    group.add(allButton);
+    class ActionHandler implements ActionListener {
+      public void selectElencoUnit() {
+        if (ffdmButton.isSelected()) {
+          DQE.this.mapCheckBoxes = DQE.this.map2D;
+        } else if (tomoButton.isSelected()) {
+          DQE.this.mapCheckBoxes = DQE.this.map3D;
+        } else {
+          DQE.this.mapCheckBoxes = DQE.this.mapUnits;
+        } 
+      }
+      
+      public void actionPerformed(ActionEvent event) {
+        selectElencoUnit();
+        DQE.this.mapUnits = DQE.this.mapCheckBoxes;
+        Set<String> set = DQE.this.mapCheckBoxes.keySet();
+        String[] elenco = new String[set.size()];
+        elenco = set.<String>toArray(elenco);
+        DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>(elenco);
+        DQE.this.unitList.setModel(model);
+        DQE.this.unitList.setSelectedIndex(0);
+        set = (Set<String>)DQE.this.mapUnits.get(DQE.this.unitList.getSelectedItem());
+        elenco = new String[set.size()];
+        elenco = set.<String>toArray(elenco);
+        model = new DefaultComboBoxModel<>(elenco);
+        DQE.this.comboList.setModel(model);
+        DQE.this.comboList.setSelectedIndex(0);
+        DQE.this.updateSpectrum(null);
+        try {
+          DQE.this.updateSNR2in();
+        } catch (ParseException e) {
+          e.printStackTrace();
+        } 
+      }
+    };
+    ActionListener actionListener = new ActionHandler();
+    ffdmButton.addActionListener(actionListener);
+    tomoButton.addActionListener(actionListener);
+    allButton.addActionListener(actionListener);
+    allButton.setSelected(true);
+    mammoPanel.add(ffdmButton, "center, cell 0 0 4 1, split 3, gapbottom 20");
+    mammoPanel.add(tomoButton, "center");
+    mammoPanel.add(allButton, "center");
+    Border b = BorderFactory.createLineBorder(Color.MAGENTA);
+    this.picture = new JLabel(createImageIcon(imageFileName));
+    this.picture.setBorder(b);
+    this.picture.setPreferredSize(new Dimension(this.larghezzaSpettro, this.altezzaSpettro));
+    JLabel unitLabel = new JLabel("Unit: ");
+    String[] elencoMammo = new String[this.set2D.size()];
+    elencoMammo = (String[])this.set2D.toArray((Object[])elencoMammo);
+    String[] elencoTomo = new String[this.set3D.size()];
+    elencoTomo = (String[])this.set3D.toArray((Object[])elencoTomo);
+    String[] elencoUnits = new String[this.setUnits.size()];
+    elencoUnits = (String[])this.setUnits.toArray((Object[])elencoUnits);
+    String[] elenco = elencoUnits;
+    this.unitList = new JComboBox<>(elenco);
+    unitLabel.setLabelFor(this.unitList);
+    this.unitList.setSelectedIndex(0);
+    mammoPanel.add(unitLabel, " left, gapbottom 40,cell 0 1 3 1,split 2");
+    mammoPanel.add(this.unitList, "top,cell 1 1 2 1");
+    mammoPanel.add(this.picture, "cell 3 1 1 3");
+    JLabel spectrumNote = new JLabel("(spectrum is normalized to its maximum value)");
+    Font fontNote = new Font("Calibri", 2, 12);
+    spectrumNote.setFont(fontNote);
+    JLabel comboLabel = new JLabel("Anode/Filter: ");
+    TreeSet<String> setCombo = this.mapUnits.get(this.unitList.getSelectedItem());
+    String[] elencoAccoppiate = new String[setCombo.size()];
+    elencoAccoppiate = (String[])setCombo.toArray((Object[])elencoAccoppiate);
+    this.comboList = new JComboBox<>(elencoAccoppiate);
+    this.comboList.setSelectedIndex(0);
+    this.unitList.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent actionEvent) {
+            String key = (String)((JComboBox)actionEvent.getSource()).getSelectedItem();
+            Set<String> set = (Set<String>)DQE.this.mapUnits.get(key);
+            String[] elenco = new String[set.size()];
+            elenco = set.<String>toArray(elenco);
+            DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>(elenco);
+            DQE.this.comboList.setModel(model);
+            DQE.this.comboList.setSelectedIndex(0);
+            DQE.this.updateSpectrum(null);
+            try {
+              DQE.this.updateSNR2in();
+            } catch (ParseException e) {
+              e.printStackTrace();
+            } 
+          }
+        });
+    this.comboList.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent actionEvent) {
+            DQE.this.updateSpectrum(null);
+            try {
+              DQE.this.updateSNR2in();
+            } catch (ParseException e) {
+              e.printStackTrace();
+            } 
+          }
+        });
+    comboLabel.setLabelFor(this.comboList);
+    mammoPanel.add(comboLabel, "cell 0 2 3 1,gapbottom 60,split 2");
+    mammoPanel.add(this.comboList, "cell 1 2 2 1");
+    JLabel kvLabel = new JLabel("kV ");
+    mammoPanel.add(kvLabel, "top, cell 0 3 3 1,split 3");
+    this.kvSlider = new JSlider(25, 40, 25);
+    this.kvSlider.setMajorTickSpacing(5);
+    this.kvSlider.setMinorTickSpacing(1);
+    this.kvSlider.setPaintLabels(true);
+    Hashtable<Object, Object> position = new Hashtable<>();
+    position.put(Integer.valueOf(25), new JLabel("25"));
+    position.put(Integer.valueOf(40), new JLabel("40"));
+    this.kvSlider.setLabelTable(position);
+    this.kvSlider.setPaintTicks(true);
+    mammoPanel.add(this.kvSlider, "top,cell 1 3 1 1");
+    final JLabel kvValue = new JLabel(":  25");
+    mammoPanel.add(kvValue, "top,cell 2 3 1 1 ");
+    mammoPanel.add(spectrumNote, "align center, cell 3 4 1 3");
+    this.kvSlider.addChangeListener(new ChangeListener() {
+          public void stateChanged(ChangeEvent changeEvent) {
+            kvValue.setText(":  " + Integer.toString(((JSlider)changeEvent.getSource()).getValue()));
+            DQE.this.updateSpectrum(null);
+            try {
+              DQE.this.updateSNR2in();
+            } catch (ParseException e) {
+              e.printStackTrace();
+            } 
+          }
+        });
+    final JPanel customPanel = new JPanel();
+    customPanel.setMinimumSize(new Dimension(larghezzaPannelli, 90));
+    TitledBorder customBorder = new TitledBorder("Custom value");
+    JLabel customLabel = new JLabel("Enter a custom value: ");
+    JLabel errorCustomLabel = new JLabel("");
+    errorCustomLabel.setForeground(Color.RED);
+    errorCustomLabel.setFont(font1);
+    errorCustomLabel.setVisible(false);
+    this.customTextField = new JTextField(5);
+    this.customTextField = new JFormattedTextField();
+    this.customTextField.setHorizontalAlignment(0);
+    this.customTextField.setColumns(4);
+    this.customTextField.setHorizontalAlignment(0);
+    this.customTextField.setFont(font1);
+    customPanel.add(customLabel, "left, span 3,split");
+    customPanel.add(this.customTextField, "left");
+    customPanel.add(errorCustomLabel);
+    customPanel.setBorder(customBorder);
+    JPanel buttonPanel = new JPanel();
+    buttonPanel.setMinimumSize(mammoPanel.getMinimumSize());
+    this.buttonOK = new JButton("COMPUTE DQE");
+    this.buttonOK.setEnabled(false);
+    this.buttonOK.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent e) {}
+        });
+    JButton buttonCancel = new JButton("CANCEL");
+    buttonCancel.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent e) {
+            dialog.dispose();
+          }
+        });
+    buttonPanel.add(this.buttonOK);
+    buttonPanel.add(buttonCancel);
+    snr2inPanel.add(iecPanel, "center,split");
+    snr2inPanel.add(eurefPanel, "center,wrap");
+    snr2inPanel.add(mammoPanel, "center,wrap");
+    snr2inPanel.add(customPanel, "center,wrap");
+    contentPane.add(snr2inPanel, "center,wrap");
+    contentPane.add(buttonPanel, "center, wrap");
+    Util.disableAllComponents(eurefPanel);
+    Util.disableAllComponents(mammoPanel);
+    Util.disableAllComponents(customPanel);
+    class MyVerifier extends InputVerifier implements ActionListener {
+      public boolean shouldYieldFocus(JComponent input) {
+        boolean inputOK = verify(input);
+        makeItPretty(input);
+        if (inputOK) {
+          DQE.this.updateSNR2in(((JTextField)input).getText());
+          return true;
+        } 
+        Toolkit.getDefaultToolkit().beep();
+        return false;
+      }
+      
+      protected void makeItPretty(JComponent input) {
+        checkField(input, true);
+      }
+      
+      protected boolean checkField(JComponent input, boolean changeIt) {
+        boolean wasValid = true;
+        int numPeriods = 0;
+        try {
+          numPeriods = DQE.this.numberFormat.parse(DQE.this.customTextField.getText()).intValue();
+        } catch (ParseException pe) {
+          wasValid = false;
+        } 
+        if (numPeriods < 0) {
+          wasValid = false;
+          if (changeIt && 
+            numPeriods < 0)
+            numPeriods = 0; 
+        } 
+        if (changeIt) {
+          DQE.this.customTextField.setText(DQE.this.numberFormat.format(numPeriods));
+          DQE.this.customTextField.selectAll();
+        } 
+        return wasValid;
+      }
+      
+      public void actionPerformed(ActionEvent actionEvent) {
+        JTextField source = (JTextField)actionEvent.getSource();
+        shouldYieldFocus(source);
+        source.selectAll();
+      }
+      
+      public boolean verify(JComponent jComponent) {
+        return checkField(jComponent, false);
+      }
+    };
+    MyVerifier verifier = new MyVerifier();
+    this.customTextField.setInputVerifier(verifier);
+    this.customTextField.addActionListener(verifier);
+    class MammoMouseHandler implements MouseListener {
+      public void mouseClicked(MouseEvent mouseEvent) {
+        Util.enableAllComponents(mammoPanel);
+        Util.disableAllComponents(iecPanel);
+        Util.disableAllComponents(eurefPanel);
+        Util.disableAllComponents(customPanel);
+        DQE.this.updateSpectrum(null);
+        try {
+          DQE.this.updateSNR2in();
+        } catch (ParseException e) {
+          e.printStackTrace();
+        } 
+      }
+      
+      public void mousePressed(MouseEvent mouseEvent) {}
+      
+      public void mouseReleased(MouseEvent mouseEvent) {}
+      
+      public void mouseEntered(MouseEvent mouseEvent) {}
+      
+      public void mouseExited(MouseEvent mouseEvent) {}
+    };
+    MammoMouseHandler mammoMouseHandler = new MammoMouseHandler();
+    mammoPanel.addMouseListener(mammoMouseHandler);
+    ffdmButton.addMouseListener(mammoMouseHandler);
+    tomoButton.addMouseListener(mammoMouseHandler);
+    allButton.addMouseListener(mammoMouseHandler);
+    this.unitList.addMouseListener(mammoMouseHandler);
+    this.comboList.addMouseListener(mammoMouseHandler);
+    this.kvSlider.addMouseListener(mammoMouseHandler);
+    unitLabel.addMouseListener(mammoMouseHandler);
+    comboLabel.addMouseListener(mammoMouseHandler);
+    kvLabel.addMouseListener(mammoMouseHandler);
+    kvValue.addMouseListener(mammoMouseHandler);
+    class eurefMouseHandler implements MouseListener {
+      public void mouseClicked(MouseEvent e) {
+        Util.enableAllComponents(eurefPanel);
+        Util.disableAllComponents(iecPanel);
+        Util.disableAllComponents(mammoPanel);
+        Util.disableAllComponents(customPanel);
+        String key = (String)DQE.this.eurefList.getSelectedItem();
+        DQE.this.snr2inTextField.setForeground(Color.BLACK);
+        DQE.this.updateSNR2in((String)DQE.this.mapEuref.get(key));
+      }
+      
+      public void mousePressed(MouseEvent mouseEvent) {}
+      
+      public void mouseReleased(MouseEvent mouseEvent) {}
+      
+      public void mouseEntered(MouseEvent mouseEvent) {}
+      
+      public void mouseExited(MouseEvent mouseEvent) {}
+    };
+    MouseListener eurefMammoHandler = new eurefMouseHandler();
+    eurefPanel.addMouseListener(eurefMammoHandler);
+    this.eurefList.addMouseListener(eurefMammoHandler);
+    eurefLabel.addMouseListener(eurefMammoHandler);
+    class IecMouseHandler implements MouseListener {
+      public void mouseClicked(MouseEvent e) {
+        Util.enableAllComponents(iecPanel);
+        Util.disableAllComponents(eurefPanel);
+        Util.disableAllComponents(mammoPanel);
+        Util.disableAllComponents(customPanel);
+        String key = (String)DQE.this.iecList.getSelectedItem();
+        DQE.this.snr2inTextField.setForeground(Color.BLACK);
+        DQE.this.updateSNR2in((String)DQE.this.mapIEC.get(key));
+      }
+      
+      public void mousePressed(MouseEvent mouseEvent) {}
+      
+      public void mouseReleased(MouseEvent mouseEvent) {}
+      
+      public void mouseEntered(MouseEvent mouseEvent) {}
+      
+      public void mouseExited(MouseEvent mouseEvent) {}
+    };
+    MouseListener iecMouseHandler = new IecMouseHandler();
+    iecPanel.addMouseListener(iecMouseHandler);
+    this.iecList.addMouseListener(iecMouseHandler);
+    iecLabel.addMouseListener(iecMouseHandler);
+    class CustomMouseHandler implements MouseListener {
+      public void mouseClicked(MouseEvent mouseEvent) {
+        Util.enableAllComponents(customPanel);
+        Util.disableAllComponents(iecPanel);
+        Util.disableAllComponents(eurefPanel);
+        Util.disableAllComponents(mammoPanel);
+        if (DQE.this.customTextField.getText() != null) {
+          if (DQE.this.customTextField.getText().isEmpty()) {
+            DQE.this.updateSNR2in("-----");
+          } else {
+            try {
+              DQE.this.updateSNR2in(DQE.this.numberFormat.format(DQE.this.numberFormat.parse(DQE.this.customTextField.getText())));
+            } catch (ParseException e) {
+              e.printStackTrace();
+            } 
+          } 
+        } else {
+          DQE.this.updateSNR2in("-----");
+        } 
+      }
+      
+      public void mousePressed(MouseEvent mouseEvent) {}
+      
+      public void mouseReleased(MouseEvent mouseEvent) {}
+      
+      public void mouseEntered(MouseEvent mouseEvent) {}
+      
+      public void mouseExited(MouseEvent mouseEvent) {}
+    };
+    MouseListener customMouseHandler = new CustomMouseHandler();
+    customPanel.addMouseListener(customMouseHandler);
+    customLabel.addMouseListener(customMouseHandler);
+    this.customTextField.addMouseListener(customMouseHandler);
+    class MammoFocusHandler implements FocusListener {
+      public void focusGained(FocusEvent focusEvent) {
+        Util.setBlackComponents(mammoPanel);
+        Util.setGreyComponents(iecPanel);
+        Util.setGreyComponents(eurefPanel);
+        Util.setGreyComponents(customPanel);
+      }
+      
+      public void focusLost(FocusEvent focusEvent) {
+        Util.setGreyComponents(mammoPanel);
+        DQE.this.snr2inTextField.setText("----");
+        DQE.this.snr2inTextField.setForeground(Color.LIGHT_GRAY);
+        DQE.this.snr2inTextField.repaint();
+      }
+    };
+    MammoFocusHandler mammoFocusHandler = new MammoFocusHandler();
+    this.buttonOK.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent actionEvent) {
+            String title = "DQE";
+            if (DQE.this.unitList.isEnabled()) {
+              String unit = (String)DQE.this.unitList.getSelectedItem();
+              String combo = (String)DQE.this.comboList.getSelectedItem();
+              String kVString = "" + DQE.this.kvSlider.getValue();
+              title = title + " for the " + unit + " unit - " + combo + " at " + kVString + " kV";
+            } else if (DQE.this.iecList.isEnabled()) {
+              title = title + " using the IEC beam quality " + DQE.this.iecList.getSelectedItem();
+            } else if (DQE.this.eurefList.isEnabled()) {
+              title = title + " using the beam quality " + DQE.this.eurefList.getSelectedItem() + " specified in European Guidelines";
+            } else if (DQE.this.customTextField.isEnabled()) {
+              title = title + " for a beam quality with a custom SNR\\u1D62\\u2099 value of: " + DQE.this.snr2inTextField.getText();
+            } 
+            GGPlot2Theme ggPlot2Theme = new GGPlot2Theme();
+            Font titleFont = ggPlot2Theme.getChartTitleFont();
+            Font axisFont = ggPlot2Theme.getAxisTitleFont();
+            Font legendNote = ggPlot2Theme.getLegendFont();
+            XYChart chart = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(1000)).height(400)).theme(Styler.ChartTheme.XChart)).title("DQE")).xAxisTitle("spatial frequency [mm).yAxisTitle("DQE").build();
+            XYChart chartMTF = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(500)).height(400)).theme(Styler.ChartTheme.XChart)).title("pMTF")).xAxisTitle("spatial frequency [mm).yAxisTitle("pMTF").build();
+            XYChart chartNNPS = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(500)).height(400)).theme(Styler.ChartTheme.XChart)).title("NNPS")).xAxisTitle("spatial frequency [mm).yAxisTitle("NNPS [mm).build();
+            Color mtfColor = new Color(3576000);
+            Color nnpsColor = new Color(164234);
+            Color dqeColor = new Color(93273);
+            ((XYStyler)chart.getStyler()).setSeriesColors(new Color[] { dqeColor });
+            ((XYStyler)chartMTF.getStyler()).setSeriesColors(new Color[] { mtfColor });
+            ((XYStyler)chartNNPS.getStyler()).setSeriesColors(new Color[] { nnpsColor });
+            ((XYStyler)chart.getStyler()).setChartBackgroundColor(Color.WHITE);
+            ((XYStyler)chartMTF.getStyler()).setChartBackgroundColor(Color.WHITE);
+            ((XYStyler)chartNNPS.getStyler()).setChartBackgroundColor(Color.WHITE);
+            ((XYStyler)chart.getStyler()).setAxisTitleFont(axisFont);
+            ((XYStyler)chartMTF.getStyler()).setAxisTitleFont(axisFont);
+            ((XYStyler)chartNNPS.getStyler()).setAxisTitleFont(axisFont);
+            ((XYStyler)chart.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+            ((XYStyler)chartMTF.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+            ((XYStyler)chartNNPS.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+            ((XYStyler)chart.getStyler()).setChartTitleBoxVisible(true);
+            ((XYStyler)chart.getStyler()).setMarkerSize(5);
+            ((XYStyler)chart.getStyler()).setPlotBorderVisible(false);
+            ((XYStyler)chartMTF.getStyler()).setChartTitleBoxVisible(true);
+            ((XYStyler)chartMTF.getStyler()).setMarkerSize(5);
+            ((XYStyler)chartMTF.getStyler()).setPlotBorderVisible(false);
+            ((XYStyler)chartNNPS.getStyler()).setChartTitleBoxVisible(true);
+            ((XYStyler)chartNNPS.getStyler()).setMarkerSize(5);
+            ((XYStyler)chartNNPS.getStyler()).setPlotBorderVisible(false);
+            int i = 0;
+            DQE.this.dqeFreq = new double[DQE.this.freq.length - 1];
+            for (int f = 1; f < DQE.this.freq.length; f++)
+              DQE.this.dqeFreq[f - 1] = DQE.this.freq[f]; 
+            DQE.this.DQEvalues = new double[DQE.this.freq.length - 1];
+            for (double d1 : DQE.this.dqeFreq) {
+              double MTF = DQE.this.MTFvalues[i + 1];
+              double NNPS = DQE.this.NNPSvalues[i + 1];
+              double K = DQE.this.K;
+              double SNR2in = 0.0D;
+              try {
+                SNR2in = DQE.this.numberFormat.parse(DQE.this.snr2inTextField.getText()).doubleValue();
+              } catch (ParseException e) {
+                e.printStackTrace();
+              } 
+              DQE.this.DQEvalues[i] = MTF * MTF / K * NNPS * SNR2in;
+              i++;
+            } 
+            int numCharts = 3;
+            List<XYChart> charts = new ArrayList<>();
+            XYSeries dqeSeries = chart.addSeries("DQE", DQE.this.dqeFreq, DQE.this.DQEvalues);
+            dqeSeries.setMarker(SeriesMarkers.CIRCLE);
+            XYSeries mtfSeries = chartMTF.addSeries("pMTF", DQE.this.freq, DQE.this.MTFvalues);
+            mtfSeries.setMarker(SeriesMarkers.SQUARE);
+            XYSeries nnpsSeries = chartNNPS.addSeries("NNPS", DQE.this.freq, DQE.this.NNPSvalues);
+            nnpsSeries.setMarker(SeriesMarkers.TRIANGLE_UP);
+            ((XYStyler)chart.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+            ((XYStyler)chartMTF.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+            ((XYStyler)chartNNPS.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+            JLabel dqeNote = new JLabel("*the DQE at zero frequency is excluded because potential low-frequency artefacts may lead to underestimation of DQE");
+            Font fontNote = new Font("Calibri", 2, 12);
+            dqeNote.setFont(fontNote);
+            Plot plotDQE = new Plot(title, "spatial frequency [mm, "DQE");
+            PlotWindow.noGridLines = false;
+            plotDQE.changeFont(new Font("Helvetica", 0, 16));
+            plotDQE.add("line", DQE.this.freq, DQE.this.DQEvalues);
+            plotDQE.setLimits(0.01D, DQE.this.freq[DQE.this.freq.length - 1] + 0.25D, 0.1D, 1.2D);
+            String[][] data = new String[DQE.this.dqeFreq.length][2];
+            NumberFormat decimalFormatter = new DecimalFormat("0.00");
+            int c = 0;
+            for (double d : DQE.this.dqeFreq) {
+              data[c][0] = decimalFormatter.format(d);
+              data[c][1] = decimalFormatter.format(DQE.this.DQEvalues[c]);
+              c++;
+            } 
+            String[] header = { "lp/mm", "DQE" };
+            final JTable tableResults = new JTable((Object[][])data, (Object[])header);
+            JPopupMenu popupMenu = new JPopupMenu();
+            JMenuItem exportItem = new JMenuItem("Export to Excel...");
+            JMenuItem copyItem = new JMenuItem("Copy");
+            JTextField tf = new JTextField();
+            tf.setEditable(false);
+            tf.setAlignmentX(0.5F);
+            DefaultCellEditor editor = new DefaultCellEditor(tf);
+            tableResults.setDefaultEditor(Object.class, editor);
+            Font font1 = new Font("Calibri", 1, 11);
+            JTableHeader headerTable = tableResults.getTableHeader();
+            TableCellRenderer rendererFromHeader = tableResults.getTableHeader().getDefaultRenderer();
+            JLabel headerLabel = (JLabel)rendererFromHeader;
+            headerLabel.setHorizontalAlignment(0);
+            headerTable.setPreferredSize(new Dimension(screen.width / 3, 50));
+            headerTable.setFont(font1);
+            JTableUtilities.setCellsAlignment(tableResults, 0);
+            final JFrame resultFrame = new JFrame("DQE Table");
+            WindowManager.addWindow(resultFrame);
+            JPanel tablePanel = new JPanel((LayoutManager)new MigLayout("fillx"));
+            resultFrame.setContentPane(tablePanel);
+            JScrollPane scrollPane = new JScrollPane(tableResults);
+            scrollPane.setPreferredSize(new Dimension(screen.width / 3 - 50, (int)(1.8D * screen.height / 4.0D)));
+            tablePanel.add(scrollPane, "center, wrap");
+            JButton buttonDQE_export = new JButton("Export DQE results");
+            buttonDQE_export.addActionListener(new ActionListener() {
+                  public void actionPerformed(ActionEvent e) {
+                    Util.exportDataToExcel(tableResults);
+                  }
+                });
+            tablePanel.add(buttonDQE_export, "center, gapy 20px");
+            resultFrame.pack();
+            resultFrame.setSize(screen.width / 3, (int)(2.2D * screen.height / 4.0D));
+            resultFrame.setLocation(0, screen.height / 4);
+            DQE.this.titleForDQE = title;
+            final JFrame results = new JFrame(title);
+            WindowManager.addWindow(results);
+            JPanel contentResults = new JPanel((LayoutManager)new MigLayout("fillx"));
+            contentResults.setMinimumSize(new Dimension(1000, 800));
+            XChartPanel mtfPanel = new XChartPanel((Chart)chartMTF);
+            XChartPanel nnpsPanel = new XChartPanel((Chart)chartNNPS);
+            XChartPanel dqePanel = new XChartPanel((Chart)chart);
+            contentResults.add((Component)mtfPanel, "cell 0 0 1 1");
+            contentResults.add((Component)nnpsPanel, "cell 1 0 1 1");
+            contentResults.add((Component)dqePanel, "cell 0 1 2 1");
+            contentResults.add(dqeNote, "center,cell 0 2 2 1 ");
+            results.setContentPane(contentResults);
+            exportItem.addActionListener(new ActionListener() {
+                  public void actionPerformed(ActionEvent actionEvent) {
+                    Util.exportDataToExcel(tableResults);
+                  }
+                });
+            ExcelAdapter adapter = new ExcelAdapter(tableResults);
+            copyItem.addActionListener((ActionListener)adapter);
+            popupMenu.add(copyItem);
+            popupMenu.add(exportItem);
+            tableResults.setComponentPopupMenu(popupMenu);
+            Thread t = new Thread(new Runnable() {
+                  public void run() {
+                    results.pack();
+                    results.setLocationRelativeTo((Component)null);
+                    results.setDefaultCloseOperation(2);
+                    results.setVisible(true);
+                    resultFrame.setVisible(true);
+                  }
+                });
+            t.start();
+          }
+        });
+    contentPane.setPreferredSize(new Dimension(larghezzaFinestra, altezzaFinestra));
+    dialog.setMaximumSize(new Dimension(screen.width - 50, screen.height - 50));
+    dialog.isResizable();
+    dialog.setContentPane(contentPane);
+    dialog.getRootPane().setDefaultButton(this.buttonOK);
+    dialog.pack();
+    dialog.setLocationRelativeTo((Component)null);
+    this.iecList.requestFocusInWindow();
+    dialog.setVisible(true);
+  }
+  
+  private void updateK(String textValue) {
+    try {
+      double K = Double.parseDouble(textValue);
+      updateK(K);
+    } catch (NumberFormatException e) {
+      this.kLabel.setText("N/A");
+    } 
+  }
+  
+  private void updateK(double doubleValue) {
+    double K = doubleValue;
+    this.K = K;
+    this.kLabel.setForeground(Color.BLACK);
+    this.kLabel.setText("K (" + (new DecimalFormat()).format(K));
+  }
+  
+  private void updateMTF(ResultsTable rs) throws RuntimeException {
+    String check = rs.getStringValue(0, rs.size() - 4);
+    if (check != null && !check.contains("Nyquist")) {
+      IJ.error("This is not a valid  MTF csv file");
+      this.buttonOK.setEnabled(false);
+      this.MTF_binSize = 0.0D;
+      throw new RuntimeException("This is not a valid MTF csv file");
+    } 
+    rs.deleteRows(rs.size() - 4, rs.size() - 1);
+    double[] f = rs.getColumnAsDoubles(0);
+    this.MTF_binSize = rs.getValueAsDouble(0, 1) - rs.getValueAsDouble(0, 0);
+    if (this.NNPS_binSize > 0.0D && this.MTF_binSize != this.NNPS_binSize) {
+      IJ.error("MTF and NNPS have not the same bin size!");
+      this.buttonOK.setEnabled(false);
+      this.MTF_binSize = 0.0D;
+      throw new RuntimeException("MTF and NNPS have not the same bin size!");
+    } 
+    if (this.NNPSvalues != null) {
+      if (f.length < this.NNPSvalues.length) {
+        IJ.error("The data in the MTF file are less than NNPS data: NNPS will be shortened.");
+        double[] newNPPS = new double[f.length];
+        System.arraycopy(this.NNPSvalues, 0, newNPPS, 0, f.length);
+        this.NNPSvalues = newNPPS;
+        this.freq = f;
+        this.MTFvalues = rs.getColumnAsDoubles(1);
+        if (this.NNPSvalues != null && this.NNPSvalues.length > 0 && 
+          this.snr2inTextField.getText() != "-----")
+          if (!Double.isNaN(this.K))
+            this.buttonOK.setEnabled(true);  
+        return;
+      } 
+      if (f.length > this.NNPSvalues.length) {
+        IJ.error("The data in the NNPS file are less than MTF data: MTF will be shortened.");
+        double[] newMTF = new double[this.NNPSvalues.length];
+        System.arraycopy(rs.getColumnAsDoubles(1), 0, newMTF, 0, this.NNPSvalues.length);
+        this.MTFvalues = newMTF;
+        if (this.NNPSvalues != null && this.NNPSvalues.length > 0 && 
+          this.snr2inTextField.getText() != "-----")
+          if (!Double.isNaN(this.K))
+            this.buttonOK.setEnabled(true);  
+        return;
+      } 
+      this.freq = f;
+      this.MTFvalues = rs.getColumnAsDoubles(1);
+      if (this.NNPSvalues != null && this.NNPSvalues.length > 0 && 
+        this.snr2inTextField.getText() != "-----")
+        if (!Double.isNaN(this.K))
+          this.buttonOK.setEnabled(true);  
+    } else {
+      this.freq = f;
+      this.MTFvalues = rs.getColumnAsDoubles(1);
+      this.buttonOK.setEnabled(false);
+    } 
+  }
+  
+  private void updateNNPS(ResultsTable rs) throws RuntimeException {
+    double[] f = rs.getColumnAsDoubles(0);
+    if (rs.getLastColumn() > 1) {
+      IJ.error("not a valid NNPS csv file");
+      this.kLabel.setText("K (N/A");
+      this.buttonOK.setEnabled(false);
+      throw new RuntimeException("not a valid NNPS csv file");
+    } 
+    this.NNPS_binSize = rs.getValueAsDouble(0, 1) - rs.getValueAsDouble(0, 0);
+    if (this.MTF_binSize > 0.0D && this.MTF_binSize != this.NNPS_binSize) {
+      IJ.error("MTF and NNPS have not the same bin size!");
+      this.buttonOK.setEnabled(false);
+      this.NNPS_binSize = 0.0D;
+      throw new RuntimeException("MTF and NNPS have not the same bin size!");
+    } 
+    String check = rs.getStringValue(0, rs.size() - 3);
+    if (check != null && check.startsWith("K")) {
+      double K = rs.getValueAsDouble(1, rs.size() - 3);
+      updateK(K);
+    } else {
+      IJ.error("not a valid NNPS csv file");
+      this.kLabel.setText("K (N/A");
+      this.buttonOK.setEnabled(false);
+      throw new RuntimeException("not a valid NNPS csv file");
+    } 
+    rs.deleteRows(rs.size() - 3, rs.size() - 1);
+    f = rs.getColumnAsDoubles(0);
+    if (this.MTFvalues != null) {
+      if (f.length < this.MTFvalues.length) {
+        double[] newMTF = new double[f.length];
+        System.arraycopy(this.MTFvalues, 0, newMTF, 0, f.length);
+        this.MTFvalues = newMTF;
+        this.NNPSvalues = rs.getColumnAsDoubles(1);
+        this.freq = f;
+        IJ.error("The data in the NNPS file are less than MTF data: MTF  will be shortened.");
+        if (this.MTFvalues != null && this.MTFvalues.length > 0 && 
+          this.snr2inTextField.getText() != "-----")
+          if (!Double.isNaN(this.K))
+            this.buttonOK.setEnabled(true);  
+        return;
+      } 
+      if (f.length > this.MTFvalues.length) {
+        double[] newNNPS = new double[this.MTFvalues.length];
+        System.arraycopy(rs.getColumnAsDoubles(1), 0, newNNPS, 0, this.MTFvalues.length);
+        this.NNPSvalues = newNNPS;
+        IJ.error("The data in the MTF file are less than NNPS data: NNPS  will be shortened.");
+        if (this.MTFvalues != null && this.MTFvalues.length > 0 && 
+          this.snr2inTextField.getText() != "-----")
+          if (!Double.isNaN(this.K))
+            this.buttonOK.setEnabled(true);  
+        return;
+      } 
+      this.freq = f;
+      this.NNPSvalues = rs.getColumnAsDoubles(1);
+      if (this.MTFvalues != null && this.MTFvalues.length > 0 && 
+        this.snr2inTextField.getText() != "-----")
+        if (!Double.isNaN(this.K))
+          this.buttonOK.setEnabled(true);  
+    } else {
+      this.freq = f;
+      this.NNPSvalues = rs.getColumnAsDoubles(1);
+      this.buttonOK.setEnabled(false);
+    } 
+  }
+  
+  public void run(String s) {
+    setUpFormats();
+    createSet2D();
+    createSet3D();
+    createListUnit();
+    createSpecialUnit();
+    createLUT();
+    SwingUtilities.invokeLater(new Runnable() {
+          public void run() {
+            try {
+              for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
+                if ("Nimbus".equals(info.getName())) {
+                  UIManager.setLookAndFeel(info.getClassName());
+                  break;
+                } 
+              } 
+            } catch (Exception exception) {}
+            DQE.this.createAndShowGUI();
+          }
+        });
+  }
+}

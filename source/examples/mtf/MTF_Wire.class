@@ -1,0 +1,661 @@
+package it.plugins.mammo.mtf;
+
+import fiji.analyze.directionality.Directionality_;
+import ij.IJ;
+import ij.ImagePlus;
+import ij.ImageStack;
+import ij.WindowManager;
+import ij.gui.DialogListener;
+import ij.gui.GenericDialog;
+import ij.plugin.PlugIn;
+import ij.process.ImageConverter;
+import ij.process.ImageProcessor;
+import it.plugins.util.ExcelAdapter;
+import it.plugins.util.ImageInfo;
+import it.plugins.util.JTableUtilities;
+import it.plugins.util.ProgressBar;
+import it.plugins.util.Surface_Fit;
+import it.plugins.util.SwingWaitForUserDialog;
+import it.plugins.util.Util;
+import java.awt.AWTEvent;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Image;
+import java.awt.LayoutManager;
+import java.awt.Rectangle;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.image.BufferedImage;
+import java.text.DecimalFormat;
+import java.text.NumberFormat;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.ResourceBundle;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.Vector;
+import javax.swing.DefaultCellEditor;
+import javax.swing.ImageIcon;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.JTextField;
+import javax.swing.UIManager;
+import javax.swing.border.TitledBorder;
+import javax.swing.table.JTableHeader;
+import javax.swing.table.TableCellRenderer;
+import manifold.internal.runtime.Bootstrap;
+import net.miginfocom.swing.MigLayout;
+import org.knowm.xchart.XChartPanel;
+import org.knowm.xchart.XYChart;
+import org.knowm.xchart.XYChartBuilder;
+import org.knowm.xchart.XYSeries;
+import org.knowm.xchart.internal.chartpart.Chart;
+import org.knowm.xchart.style.GGPlot2Theme;
+import org.knowm.xchart.style.Styler;
+import org.knowm.xchart.style.XYStyler;
+import org.knowm.xchart.style.markers.SeriesMarkers;
+
+public class MTF_Wire implements PlugIn, DialogListener {
+  private Float A;
+  
+  private Float B;
+  
+  private boolean isLinear;
+  
+  private boolean isLog;
+  
+  private boolean isVerticalWire;
+  
+  static {
+    Bootstrap.init();
+  }
+  
+  private static final ResourceBundle messages = Util.getMessages();
+  
+  private String[] choices = new String[] { Util.getStringMessage("vertical_wire_choice", new Object[0]), 
+      Util.getStringMessage("horizzontal_wire_choice", new Object[0]) };
+  
+  private ImagePlus imp;
+  
+  ProgressBar myProgressBar;
+  
+  public void run(String string) {
+    try {
+      for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
+        if ("Nimbus".equals(info.getName())) {
+          UIManager.setLookAndFeel(info.getClassName());
+          break;
+        } 
+      } 
+    } catch (Exception e) {
+      try {
+        UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+      } catch (Exception ex) {
+        System.out.println("Error setting Java LAF: " + ex);
+      } 
+    } 
+    WindowManager.closeAllWindows();
+    try {
+      MTF_Wire();
+    } catch (Exception e) {
+      JOptionPane.showMessageDialog(null, "Something gone wrong! (Wire not present?) Please, re--try");
+      WindowManager.closeAllWindows();
+      if (this.myProgressBar != null)
+        this.myProgressBar.closeDialog(); 
+      return;
+    } 
+  }
+  
+  public boolean dialogItemChanged(GenericDialog gd, AWTEvent awte) {
+    throw new UnsupportedOperationException("Not supported yet.");
+  }
+  
+  private void MTF_Wire() {
+    ImageInfo imageInfo = Util.OpenSingleImage();
+    if (imageInfo == null) {
+      JOptionPane.showMessageDialog(null, Util.getStringMessage("closed_single_dialog_error", new Object[0]), "Error", 0);
+      return;
+    } 
+    this.imp = imageInfo.getImmagine();
+    if (this.imp == null) {
+      IJ.error(Util.getStringMessage("closed_single_dialog_error", new Object[0]));
+      JOptionPane.showMessageDialog(null, Util.getStringMessage("closed_single_dialog_error", new Object[0]), "Error", 0);
+      return;
+    } 
+    this.imp.show();
+    if (!Util.isImageOpened()) {
+      IJ.noImage();
+    } else {
+      float[][] LineArray;
+      ImageStack stack = this.imp.getImageStack();
+      float dimPx = Util.getPixelDimensionFromHeader(this.imp);
+      if (stack.getSize() > 1) {
+        (new SwingWaitForUserDialog("User action required", 
+            Util.getStringMessage("frame_user_WIRE_message", new Object[0])))
+          .show();
+        int numeroImmagine = this.imp.getCurrentSlice();
+        this.imp.setSlice(numeroImmagine);
+        ImageProcessor imageProc = this.imp.getImageStack().getProcessor(numeroImmagine);
+        this.imp.close();
+        this.imp = new ImagePlus("Image to analyze", imageProc);
+        this.imp.show();
+      } 
+      int centroX = WindowManager.getCurrentImage().getWidth() / 2;
+      int centroY = WindowManager.getCurrentImage().getHeight() / 2;
+      Rectangle roiFilo = new Rectangle(centroX, centroY, (int)(15.0F / dimPx), (int)(15.0F / dimPx));
+      IJ.makeRectangle(roiFilo.x, roiFilo.y, roiFilo.width, roiFilo.height);
+      (new SwingWaitForUserDialog("User action required", 
+          Util.getStringMessage("ROI_user_WIRE_message", new Object[0]))).show();
+      roiFilo = this.imp.getProcessor().getRoi();
+      this.imp.setRoi(roiFilo);
+      ImageProcessor roiProc = this.imp.getProcessor();
+      roiProc.setRoi(roiFilo);
+      roiProc = roiProc.crop();
+      Directionality_ dir = new Directionality_();
+      dir.setImagePlus(new ImagePlus("directionalilty", roiProc));
+      dir.setMethod(Directionality_.AnalysisMethod.FOURIER_COMPONENTS);
+      dir.setBinNumber(90);
+      dir.setBinStart(-90.0D);
+      dir.setBinRange(-90.0D, 90.0D);
+      dir.computeHistograms();
+      dir.fitHistograms();
+      ArrayList<double[]> fitParams = dir.getFitAnalysis();
+      double[] params = fitParams.get(0);
+      double peak = Math.toDegrees(params[0]);
+      this.isVerticalWire = (Math.abs(peak) > 45.0D);
+      if (this.isVerticalWire) {
+        IJ.makeRectangle(roiFilo.x + (int)(15.0F / dimPx), roiFilo.y, roiFilo.width, roiFilo.height);
+      } else {
+        IJ.makeRectangle(roiFilo.x, roiFilo.y + (int)(15.0F / dimPx), roiFilo.width, roiFilo.height);
+      } 
+      (new SwingWaitForUserDialog("User action required", Util.getStringMessage("second_ROI_WIRE_message", new Object[0])))
+        .show();
+      this.myProgressBar = new ProgressBar();
+      this.myProgressBar.setValues(0.1D, "Finding wire orientation...", 800L);
+      Rectangle roiFondo = this.imp.getProcessor().getRoi();
+      IJ.showStatus(Util.getStringMessage("background_correction_message", new Object[0]));
+      IJ.showProgress(1, 8);
+      ImageConverter converter = new ImageConverter(this.imp);
+      converter.convertToGray32();
+      this.myProgressBar.setValues(0.2D, "Detrending with 2D Surface fit...", 1000L);
+      ImageProcessor fitted = Surface_Fit.fit(roiFondo, this.imp.getProcessor());
+      float min = (float)fitted.getMin();
+      float[][] arrayFittedPixel = fitted.getFloatArray();
+      for (int m = 0; m < roiFilo.height; m++) {
+        for (int l = 0; l < roiFilo.width; l++) {
+          float oldValue = this.imp.getProcessor().getPixelValue(roiFilo.x + l, roiFilo.y + m);
+          float newValue = oldValue - arrayFittedPixel[l][m] - min;
+          this.imp.getProcessor().putPixelValue(roiFilo.x + l, roiFilo.y + m, newValue);
+        } 
+      } 
+      WindowManager.getCurrentImage().updateAndRepaintWindow();
+      IJ.makeRectangle(roiFilo.x, roiFilo.y, roiFilo.width, roiFilo.height);
+      WindowManager.getCurrentImage().getProcessor().setRoi(roiFilo);
+      ImageProcessor displayProc = WindowManager.getCurrentImage().getProcessor().crop();
+      ImagePlus wireImage = new ImagePlus("Roi used for the analysis", displayProc);
+      BufferedImage bufferedWire = wireImage.getBufferedImage();
+      ImageIcon imageIcon = new ImageIcon(bufferedWire);
+      Image image = imageIcon.getImage();
+      Image newimg = image.getScaledInstance(500, 400, 4);
+      imageIcon = new ImageIcon(newimg);
+      JLabel jLabel = new JLabel(imageIcon);
+      JPanel wirePanel = new JPanel();
+      TitledBorder wireBorder = new TitledBorder("ROI used for the analysis (2D Fit subtracted)");
+      wirePanel.setBorder(wireBorder);
+      wirePanel.add(jLabel);
+      wirePanel.setToolTipText("ROI used for the analysis (2D Fit subtracted)");
+      IJ.showStatus(Util.getStringMessage("PROFILE_PROJECTION_message", new Object[0]));
+      this.myProgressBar.setValues(0.3D, "Getting wire profiles...", 600L);
+      IJ.showProgress(2, 8);
+      int n_col = roiFilo.width;
+      int l_righe = roiFilo.height;
+      float[][] tLineArray = new float[n_col][l_righe];
+      if (this.isVerticalWire) {
+        LineArray = new float[n_col][l_righe];
+      } else {
+        LineArray = new float[l_righe][n_col];
+      } 
+      int xStart = roiFilo.x;
+      int yStart = roiFilo.y;
+      int xEnd = roiFilo.x + roiFilo.width;
+      int yEnd = roiFilo.y + roiFilo.height;
+      float[] profilo = new float[n_col];
+      int n;
+      for (n = 0; n < l_righe; n++) {
+        this.imp.getProcessor().convertToFloatProcessor().getRow(xStart, yStart + n, profilo, n_col);
+        for (int i20 = 0; i20 < n_col; i20++) {
+          if (this.isVerticalWire) {
+            LineArray[i20][n] = profilo[i20];
+          } else {
+            tLineArray[i20][n] = profilo[i20];
+          } 
+        } 
+      } 
+      if (!this.isVerticalWire) {
+        for (n = 0; n < l_righe; n++) {
+          for (int i20 = 0; i20 < n_col; i20++)
+            LineArray[n][i20] = tLineArray[i20][n]; 
+        } 
+        int scambio = n_col;
+        n_col = l_righe;
+        l_righe = scambio;
+      } 
+      IJ.showStatus(Util.getStringMessage("PROFILE_done_message", new Object[0]));
+      IJ.showStatus("....");
+      IJ.showStatus(".........");
+      IJ.showStatus(Util.getStringMessage("WIRE_angle_calc_message", new Object[0]));
+      this.myProgressBar.setValues(0.4D, "Determining wire angle...", 400L);
+      IJ.showProgress(3, 8);
+      float[] posMax = new float[l_righe];
+      int code = n_col / 10;
+      try {
+        for (int i20 = 0; i20 < l_righe; i20++) {
+          float Maximum = 0.0F;
+          for (int i21 = 0; i21 < n_col; i21++) {
+            if (LineArray[i21][i20] > Maximum) {
+              posMax[i20] = i21;
+              Maximum = LineArray[i21][i20];
+            } 
+          } 
+        } 
+      } catch (Exception e) {
+        IJ.error(Util.getStringMessage("WIRE_not_found_error", new Object[0]));
+        JOptionPane.showMessageDialog(null, Util.getStringMessage("WIRE_not_found_error", new Object[0]), "Error", 0);
+        if (this.myProgressBar != null)
+          this.myProgressBar.closeDialog(); 
+        return;
+      } 
+      float xMed = ((l_righe - 1) / 2);
+      float yMed = 0.0F;
+      for (int i = 0; i < l_righe; i++)
+        yMed += posMax[i]; 
+      yMed /= l_righe;
+      float scXq = 0.0F;
+      float scXY = 0.0F;
+      for (int i1 = 0; i1 < l_righe; i1++) {
+        scXq += (i1 - xMed) * (i1 - xMed);
+        scXY += (i1 - xMed) * (posMax[i1] - yMed);
+      } 
+      float CoefAng = scXY / scXq;
+      float angolo = (float)Math.atan(CoefAng);
+      IJ.showStatus(Util.getStringMessage("WIRE_angle", new Object[0]) + IJ.d2s((angolo * 180.0F) / 3.14D) + ");
+      float CosTeta = (float)Math.cos(angolo);
+      float SinTeta = (float)Math.sin(angolo);
+      int dimetotal = n_col * l_righe;
+      float[][] total = new float[dimetotal][2];
+      TreeMap<Double, Double> mapTotal = new TreeMap<>();
+      IJ.showStatus(Util.getStringMessage("SUPERSAMPLE_PROFILE_message", new Object[0]));
+      this.myProgressBar.setValues(0.5D, "Projecting wire profiles...", 600L);
+      IJ.showProgress(4, 8);
+      for (int i2 = 0; i2 < l_righe; i2++) {
+        for (int i20 = 0; i20 < n_col; i20++) {
+          total[i2 * n_col + i20][0] = i20 * CosTeta * dimPx - i2 * SinTeta * dimPx;
+          double x = (i20 * CosTeta * dimPx - i2 * SinTeta * dimPx);
+          total[i2 * n_col + i20][1] = LineArray[i20][i2];
+          double pv = LineArray[i20][i2];
+          mapTotal.put(Double.valueOf(x), Double.valueOf(pv));
+        } 
+      } 
+      total = Util.ordina(total, dimetotal);
+      Set<Double> keySet = mapTotal.keySet();
+      total = new float[dimetotal][2];
+      int counter = 0;
+      for (Iterator<Double> iterator = keySet.iterator(); iterator.hasNext(); ) {
+        double x = ((Double)iterator.next()).doubleValue();
+        total[counter][0] = (float)x;
+        total[counter][1] = ((Double)mapTotal.get(Double.valueOf(x))).floatValue();
+        counter++;
+      } 
+      IJ.showStatus(Util.getStringMessage("LSF_calc_message", new Object[0]));
+      float[] xValori0 = new float[dimetotal];
+      float[] yValori0 = new float[dimetotal];
+      float init = total[0][0];
+      for (int i3 = 0; i3 < dimetotal; i3++) {
+        total[i3][0] = total[i3][0] - init;
+        xValori0[i3] = total[i3][0];
+        yValori0[i3] = total[i3][1];
+      } 
+      GGPlot2Theme ggPlot2Theme = new GGPlot2Theme();
+      Font titleFont = ggPlot2Theme.getChartTitleFont();
+      Font axisFont = ggPlot2Theme.getAxisTitleFont();
+      Color wireColor = new Color(15149450);
+      XYChart chartOversampled = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(500)).height(400)).theme(Styler.ChartTheme.XChart)).title("original oversampled LSF")).xAxisTitle("").yAxisTitle("").build();
+      ((XYStyler)chartOversampled.getStyler()).setSeriesColors(new Color[] { Color.BLACK });
+      ((XYStyler)chartOversampled.getStyler()).setChartBackgroundColor(Color.WHITE);
+      ((XYStyler)chartOversampled.getStyler()).setAxisTitleFont(axisFont);
+      ((XYStyler)chartOversampled.getStyler()).setChartTitleFont(titleFont);
+      ((XYStyler)chartOversampled.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+      ((XYStyler)chartOversampled.getStyler()).setChartTitleBoxVisible(true);
+      ((XYStyler)chartOversampled.getStyler()).setPlotBorderVisible(false);
+      XYSeries overSampledSeries = chartOversampled.addSeries("Oversampled LSF", xValori0, yValori0);
+      overSampledSeries.setLineWidth(0.5F);
+      overSampledSeries.setMarker(SeriesMarkers.NONE);
+      ((XYStyler)chartOversampled.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+      XChartPanel overSampledPanel = new XChartPanel((Chart)chartOversampled);
+      int k = 1;
+      int kmedia = 0;
+      float media = 0.0F;
+      float[][] lsf = new float[dimetotal][2];
+      this.myProgressBar.setValues(0.55D, "Resampling the LSF...", 400L);
+      float DeltaX = dimPx / 15.0F;
+      for (int j = 0; j < dimetotal; j++) {
+        if (total[j][0] < k * DeltaX) {
+          media += total[j][1];
+          kmedia++;
+        } else {
+          media /= kmedia;
+          lsf[k][1] = media;
+          lsf[k][0] = (k - 1) * DeltaX;
+          k++;
+          media = total[j][1];
+          media = 0.0F;
+          kmedia = 1;
+        } 
+      } 
+      this.myProgressBar.setValues(0.6D, "Smooting the LSF...", 400L);
+      double[] lsfToSmooth = new double[k];
+      double[] lsfSmoothed = new double[k];
+      int i4;
+      for (i4 = 0; i4 < k; i4++)
+        lsfToSmooth[i4] = lsf[i4][1]; 
+      lsfSmoothed = Util.medfilt1(lsfToSmooth, 3);
+      for (i4 = 0; i4 < k; i4++)
+        lsf[i4][1] = (float)lsfSmoothed[i4]; 
+      float max = 0.0F;
+      int posMassimo = 0;
+      for (int i5 = 0; i5 < k; i5++) {
+        if (lsf[i5][1] > max) {
+          max = lsf[i5][1];
+          posMassimo = i5;
+        } 
+      } 
+      this.myProgressBar.setValues(0.7D, "Elimination of the continuous component of the LSF curve...", 400L);
+      float continua = 0.0F;
+      code = k / 50;
+      media = 0.0F;
+      code = 5;
+      for (int i7 = 1; i7 <= code; i7++)
+        media = media + lsf[k - i7][1] + lsf[i7][1]; 
+      continua = media / (2 * code);
+      for (int i6 = 0; i6 < k; i6++)
+        lsf[i6][1] = lsf[i6][1] - continua; 
+      this.myProgressBar.setValues(0.75D, "Hann window filtering...", 600L);
+      float[][] lsfHann = new float[k][2];
+      for (int i8 = 0; i8 < k; i8++) {
+        lsfHann[i8][0] = lsf[i8][0];
+        lsfHann[i8][1] = lsf[i8][1];
+      } 
+      int sizeHann = (int)(k / 1.25D);
+      int pos = posMassimo - sizeHann / 2;
+      int i9;
+      for (i9 = pos; i9 < pos + sizeHann; i9++) {
+        int i20 = i9 - pos;
+        lsfHann[i9][1] = (float)(lsfHann[i9][1] * 0.5D * (1.0D - Math.cos(6.283185307179586D * i20 / sizeHann)));
+      } 
+      for (i9 = 0; i9 < pos; i9++)
+        lsfHann[i9][1] = 0.0F; 
+      for (i9 = pos + sizeHann; i9 < k; i9++)
+        lsfHann[i9][1] = 0.0F; 
+      IJ.showProgress(5, 8);
+      max = 0.0F;
+      for (i9 = 0; i9 < k; i9++) {
+        if (lsfHann[i9][1] > max)
+          max = lsfHann[i9][1]; 
+      } 
+      for (i9 = 0; i9 < k; i9++)
+        lsfHann[i9][1] = lsfHann[i9][1] / max; 
+      float[] xValori = new float[k];
+      float[] yValori = new float[k];
+      int i10;
+      for (i10 = 0; i10 < k; i10++) {
+        xValori[i10] = lsfHann[i10][0];
+        yValori[i10] = lsfHann[i10][1];
+      } 
+      for (i10 = 0; i10 < k; i10++)
+        yValori[i10] = lsfHann[i10][1]; 
+      XYChart chartLSF = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(500)).height(400)).theme(Styler.ChartTheme.XChart)).title(Util.getStringMessage("LSF_normalized_plot_title", new Object[0]))).xAxisTitle("").yAxisTitle("").build();
+      ((XYStyler)chartLSF.getStyler()).setSeriesColors(new Color[] { Color.BLACK });
+      ((XYStyler)chartLSF.getStyler()).setChartBackgroundColor(Color.WHITE);
+      ((XYStyler)chartLSF.getStyler()).setAxisTitleFont(axisFont);
+      ((XYStyler)chartLSF.getStyler()).setChartTitleFont(titleFont);
+      ((XYStyler)chartLSF.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+      ((XYStyler)chartLSF.getStyler()).setChartTitleBoxVisible(true);
+      ((XYStyler)chartLSF.getStyler()).setPlotBorderVisible(false);
+      XYSeries lsfSeries = chartLSF.addSeries("LSF", xValori, yValori);
+      lsfSeries.setLineWidth(0.5F);
+      lsfSeries.setMarker(SeriesMarkers.NONE);
+      ((XYStyler)chartLSF.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+      XChartPanel lsfPanel = new XChartPanel((Chart)chartLSF);
+      float[][] arraydft = new float[k][2];
+      float argomento = 0.0F;
+      IJ.showStatus(Util.getStringMessage("MTF_Fourier_calc_message", new Object[0]));
+      IJ.showProgress(7, 8);
+      for (int i11 = 0; i11 < k; i11++) {
+        arraydft[i11][0] = 0.0F;
+        arraydft[i11][1] = 0.0F;
+        for (int i20 = 0; i20 < k; i20++) {
+          argomento = (float)(6.283185307179586D * i20 * i11 / k);
+          arraydft[i11][0] = arraydft[i11][0] + (float)(lsfHann[i20][1] * Math.cos(argomento));
+          arraydft[i11][1] = arraydft[i11][1] - (float)(lsfHann[i20][1] * Math.sin(argomento));
+        } 
+      } 
+      this.myProgressBar.setValues(0.8D, "Computing pMTF...", 500L);
+      int nf2 = k / 2;
+      float[] mag = new float[nf2];
+      for (int i12 = 0; i12 < nf2; i12++)
+        mag[i12] = (float)Math.sqrt((arraydft[i12][0] * arraydft[i12][0] + arraydft[i12][1] * arraydft[i12][1])); 
+      float maxMTF = 0.0F;
+      for (int i13 = 0; i13 < nf2; i13++) {
+        if (mag[i13] > maxMTF)
+          maxMTF = mag[i13]; 
+      } 
+      float DeltafMTF = 1.0F / k * DeltaX;
+      int NPointsMTF = (int)(10.0F / DeltafMTF);
+      if (NPointsMTF > nf2)
+        NPointsMTF = nf2 - 1; 
+      float[] xMTF = new float[NPointsMTF];
+      float[] yMTF = new float[NPointsMTF];
+      float[] xMTF_025 = new float[40];
+      float[] yMTF_025 = new float[40];
+      for (int i14 = 0; i14 < NPointsMTF; i14++) {
+        xMTF[i14] = i14 * DeltafMTF;
+        yMTF[i14] = mag[i14] / maxMTF;
+      } 
+      this.myProgressBar.setValues(0.95D, Util.getStringMessage("MTF_rebin_calc_message", new Object[0]), 600L);
+      float DeltaEuref = 0.25F;
+      int kEuref = 1;
+      int kmediaEuref = 0;
+      float mediaEuref = 0.0F;
+      for (int i15 = 0; i15 < NPointsMTF; i15++) {
+        float fbin = kEuref * DeltaEuref;
+        float f1 = xMTF[i15];
+        if (fbin > 10.0F)
+          break; 
+        if (f1 < fbin) {
+          mediaEuref += yMTF[i15];
+          kmediaEuref++;
+        } else {
+          mediaEuref /= kmediaEuref;
+          yMTF_025[kEuref] = mediaEuref;
+          xMTF_025[kEuref] = kEuref * DeltaEuref;
+          kEuref++;
+          mediaEuref = yMTF[i15];
+          kmediaEuref = 0;
+          mediaEuref += yMTF[i15];
+          kmediaEuref++;
+        } 
+      } 
+      float DeltaMarshall = 0.25F;
+      Vector<Float> vectFreqIEC = new Vector<>();
+      Vector<Float> vectMTF_IEC = new Vector<>();
+      int kIEC = 0;
+      int kmediaIEC = 0;
+      float mediaIEC = 0.0F;
+      float fint = 0.01F / dimPx;
+      for (int i16 = 0; i16 < NPointsMTF - 1; i16++) {
+        float f1 = xMTF[i16];
+        float inf = kIEC * DeltaEuref - fint;
+        float sup = kIEC * DeltaEuref + fint;
+        if (f1 >= inf && f1 < sup) {
+          mediaIEC += yMTF[i16];
+          kmediaIEC++;
+          float f_succ = xMTF[i16 + 1];
+          if (f_succ >= sup) {
+            vectFreqIEC.add(Float.valueOf(kIEC * DeltaEuref));
+            vectMTF_IEC.add(Float.valueOf(mediaIEC / kmediaIEC));
+            kIEC++;
+            kmediaIEC = 0;
+            mediaIEC = 0.0F;
+          } 
+        } 
+      } 
+      double[] x_025 = new double[vectFreqIEC.size()];
+      double[] mtf_025 = new double[vectMTF_IEC.size()];
+      x_025 = vectFreqIEC.stream().mapToDouble(f -> (f != null) ? f.floatValue() : Double.NaN).toArray();
+      mtf_025 = vectMTF_IEC.stream().mapToDouble(f -> (f != null) ? f.floatValue() : Double.NaN).toArray();
+      float[] xMTF_IEC = new float[40];
+      float[] yMTF_IEC = new float[40];
+      fint = 0.01F / dimPx;
+      kIEC = 1;
+      kmediaIEC = 0;
+      mediaIEC = 0.0F;
+      boolean primoBinRiempito = false;
+      for (int i17 = 0; i17 < NPointsMTF; i17++) {
+        float fbin = kIEC * DeltaEuref;
+        if (fbin > 10.0F)
+          break; 
+        float f1 = xMTF[i17];
+        if (f1 < fint) {
+          mediaIEC += yMTF[i17];
+          kmediaIEC++;
+        } else if (kIEC > 1) {
+          if (f1 >= (kIEC - 1) * DeltaEuref - fint)
+            if ((kIEC - 1) * DeltaEuref - fint <= f1 && f1 < (kIEC - 1) * DeltaEuref + fint) {
+              mediaIEC += yMTF[i17];
+              kmediaIEC++;
+            } else {
+              yMTF_IEC[kIEC - 1] = mediaIEC / kmediaIEC;
+              xMTF_IEC[kIEC - 1] = (kIEC - 1) * DeltaEuref;
+              kIEC++;
+              kmediaIEC = 0;
+              mediaIEC = 0.0F;
+              mediaIEC += yMTF[i17];
+              kmediaIEC++;
+            }  
+        } else {
+          xMTF_IEC[0] = 0.0F;
+          yMTF_IEC[0] = mediaIEC / kmediaIEC;
+          kmediaIEC = 0;
+          mediaIEC = 0.0F;
+          kIEC++;
+          mediaIEC += yMTF[i17];
+          kmediaIEC++;
+        } 
+      } 
+      float maxMTFIEC = 0.0F;
+      float maxMTF025 = 0.0F;
+      int i18;
+      for (i18 = 0; i18 < xMTF_IEC.length; i18++) {
+        if (yMTF_025[i18] > maxMTF025)
+          maxMTF025 = yMTF_025[i18]; 
+        if (yMTF_IEC[i18] > maxMTFIEC)
+          maxMTFIEC = yMTF_IEC[i18]; 
+      } 
+      for (i18 = 0; i18 < xMTF_IEC.length; i18++);
+      IJ.showStatus(Util.getStringMessage("MTF_plotting_message", new Object[0]));
+      IJ.showProgress(8, 8);
+      this.myProgressBar.setValues(1.0D, Util.getStringMessage("MTF_calc_done", new Object[0]), 1000L);
+      this.myProgressBar.closeDialog();
+      XYChart chartMTF = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(500)).height(400)).theme(Styler.ChartTheme.XChart)).title(Util.getStringMessage("MTF_rebin_plot_title", new Object[0]))).xAxisTitle("spatial frequency [mm).yAxisTitle("pMTF").build();
+      ((XYStyler)chartMTF.getStyler()).setSeriesColors(new Color[] { wireColor });
+      ((XYStyler)chartMTF.getStyler()).setChartBackgroundColor(Color.WHITE);
+      ((XYStyler)chartMTF.getStyler()).setAxisTitleFont(axisFont);
+      ((XYStyler)chartMTF.getStyler()).setChartTitleFont(titleFont);
+      ((XYStyler)chartMTF.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+      ((XYStyler)chartMTF.getStyler()).setChartTitleBoxVisible(true);
+      ((XYStyler)chartMTF.getStyler()).setPlotBorderVisible(false);
+      XYSeries pMTFSeries = chartMTF.addSeries("pMTF", xMTF_IEC, yMTF_IEC);
+      pMTFSeries.setLineWidth(2.0F);
+      pMTFSeries.setMarker(SeriesMarkers.NONE);
+      ((XYStyler)chartMTF.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+      XChartPanel mtfPanel = new XChartPanel((Chart)chartMTF);
+      JFrame wireMTFFrame = new JFrame("pMTF in the x-y plane");
+      WindowManager.addWindow(wireMTFFrame);
+      wireMTFFrame.setMinimumSize(new Dimension(1000, 800));
+      JPanel contentResults = new JPanel((LayoutManager)new MigLayout("fillx"));
+      contentResults.add((Component)overSampledPanel, "cell 0 0 1 1");
+      contentResults.add((Component)lsfPanel, "cell 1 0 1 1");
+      contentResults.add((Component)mtfPanel, "cell 0 1 1 1");
+      contentResults.add(wirePanel, "cell 1 1 1 1");
+      wireMTFFrame.setContentPane(contentResults);
+      wireMTFFrame.pack();
+      wireMTFFrame.setLocationRelativeTo((Component)null);
+      wireMTFFrame.setDefaultCloseOperation(2);
+      wireMTFFrame.setVisible(true);
+      String[] header = { "spatial frequency [mm, "pMTF" };
+      String[][] data = new String[xMTF_IEC.length][2];
+      NumberFormat decimalFormatter = new DecimalFormat("0.00");
+      NumberFormat decimalFormatter3 = new DecimalFormat("0.000");
+      NumberFormat percentageFormatter = NumberFormat.getPercentInstance();
+      percentageFormatter.setMinimumFractionDigits(1);
+      int c = 0;
+      float[] arrayOfFloat1;
+      int i19;
+      byte b;
+      for (arrayOfFloat1 = xMTF_IEC, i19 = arrayOfFloat1.length, b = 0; b < i19; ) {
+        double freq = arrayOfFloat1[b];
+        data[c][0] = decimalFormatter.format(freq);
+        data[c][1] = decimalFormatter3.format(yMTF_IEC[c]);
+        c++;
+        b++;
+      } 
+      JTextField tf = new JTextField();
+      tf.setEditable(false);
+      tf.setAlignmentX(0.5F);
+      DefaultCellEditor editor = new DefaultCellEditor(tf);
+      final JTable tableResults = new JTable((Object[][])data, (Object[])header);
+      tableResults.setDefaultEditor(Object.class, editor);
+      Font f = new Font("Calibri", 1, 11);
+      JTableHeader headerTable = tableResults.getTableHeader();
+      TableCellRenderer rendererFromHeader = tableResults.getTableHeader().getDefaultRenderer();
+      JLabel headerLabel = (JLabel)rendererFromHeader;
+      headerLabel.setHorizontalAlignment(0);
+      Dimension screen = IJ.getScreenSize();
+      headerTable.setPreferredSize(new Dimension(screen.width / 2, 30));
+      headerTable.setFont(f);
+      JTableUtilities.setCellsAlignment(tableResults, 0);
+      JMenuItem copyItem = new JMenuItem("Copy");
+      JMenuItem exportItem = new JMenuItem("Export to Excel...");
+      exportItem.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent actionEvent) {
+              Util.exportDataToExcel(tableResults);
+            }
+          });
+      ExcelAdapter adapter = new ExcelAdapter(tableResults);
+      copyItem.addActionListener((ActionListener)adapter);
+      JPopupMenu popupMenu = new JPopupMenu();
+      popupMenu.add(copyItem);
+      popupMenu.add(exportItem);
+      tableResults.setComponentPopupMenu(popupMenu);
+      JFrame resultFrame = new JFrame("Results");
+      WindowManager.addWindow(resultFrame);
+      resultFrame.add(new JScrollPane(tableResults));
+      resultFrame.pack();
+      resultFrame.setSize(screen.width / 4, screen.height / 2);
+      resultFrame.setLocationRelativeTo((Component)null);
+      resultFrame.setDefaultCloseOperation(2);
+      resultFrame.setVisible(true);
+      float fnyq = (float)(0.5D / dimPx);
+      String msg = "Nyquist Freq (mm" + Util.decimalFormatEsak.format(fnyq) + "\npMTFis " + Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_IEC, yMTF_IEC, 0.5F)) + "\npMTFis " + Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_IEC, yMTF_IEC, 0.1F)) + "\npMTF (%) at Nyquist is " + Util.decimalFormatMAs.format((100.0F * Util.MTFValueAt(xMTF_IEC, yMTF_IEC, fnyq)));
+      JOptionPane.showMessageDialog(null, msg, "pMTF Summary", 1);
+    } 
+  }
+}

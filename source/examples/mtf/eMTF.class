@@ -1,0 +1,332 @@
+package it.plugins.mammo.mtf;
+
+import ij.IJ;
+import ij.ImageJ;
+import ij.ImagePlus;
+import ij.WindowManager;
+import ij.gui.DialogListener;
+import ij.gui.GenericDialog;
+import ij.gui.Plot;
+import ij.gui.PlotWindow;
+import ij.plugin.PlugIn;
+import it.plugins.util.ImageInfo;
+import it.plugins.util.ResponseInfo;
+import it.plugins.util.SwingWaitForUserDialog;
+import it.plugins.util.Util;
+import java.awt.AWTEvent;
+import java.awt.Rectangle;
+import javax.swing.UIManager;
+import manifold.internal.runtime.Bootstrap;
+
+public class eMTF implements PlugIn, DialogListener {
+  private Float A;
+  
+  private Float B;
+  
+  private boolean isLinear;
+  
+  private boolean isLog;
+  
+  private boolean isVerticalEdge;
+  
+  static {
+    Bootstrap.init();
+  }
+  
+  private String[] choices = new String[] { "EDGE VERTICALE", "EDGE ORIZZONTALE" };
+  
+  private ImagePlus imp;
+  
+  public void run(String string) {
+    try {
+      UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+    } catch (Exception e) {
+      System.out.println("Error setting Java LAF: " + e);
+    } 
+    GenericDialog dialogEdge = new GenericDialog("SCELTA ORIENTAMENTO EDGE");
+    dialogEdge.addChoice("TIPO DI EDGE", this.choices, this.choices[0]);
+    dialogEdge.addDialogListener(new DialogListener() {
+          public boolean dialogItemChanged(GenericDialog gd, AWTEvent awte) {
+            if (gd.wasOKed()) {
+              String scelta = gd.getNextChoice();
+              if (scelta.equals(eMTF.this.choices[0])) {
+                gd.dispose();
+                eMTF.this.isVerticalEdge = true;
+              } else {
+                gd.dispose();
+                eMTF.this.isVerticalEdge = false;
+              } 
+            } 
+            return true;
+          }
+        });
+    dialogEdge.pack();
+    dialogEdge.showDialog();
+    if (dialogEdge.wasCanceled())
+      return; 
+    MTF();
+  }
+  
+  public void MTF() {
+    ImageInfo imageInfo = Util.OpenSingleImage();
+    if (imageInfo == null) {
+      IJ.error(Util.getStringMessage("closed_single_dialog_error", new Object[0]));
+      return;
+    } 
+    this.imp = imageInfo.getImmagine();
+    if (this.imp == null) {
+      IJ.error("OCCORRE SELEZIONARE L'IMMAGINE DA ANALIZZARE");
+      return;
+    } 
+    this.imp.show();
+    if (!Util.isImageOpened()) {
+      IJ.noImage();
+    } else {
+      float[][] EdgeArray;
+      ResponseInfo ri = Util.correggiDose();
+      this.A = ri.getA();
+      this.B = ri.getB();
+      this.isLinear = ri.isIsLinear();
+      this.isLog = ri.isIsLog();
+      if (ri == null) {
+        IJ.error("OCCORRE LINEARIZZARE L'IMMAGINE");
+        return;
+      } 
+      float dimPx = Util.getPixelDimensionFromHeader(this.imp);
+      int centroX = WindowManager.getCurrentImage().getWidth() / 2;
+      int centroY = WindowManager.getCurrentImage().getHeight() / 2;
+      if (this.isVerticalEdge) {
+        roiEdge = new Rectangle(centroX, centroY, (int)(20.0F / dimPx), (int)(40.0F / dimPx));
+      } else {
+        roiEdge = new Rectangle(centroX, centroY, (int)(40.0F / dimPx), (int)(20.0F / dimPx));
+      } 
+      IJ.makeRectangle(roiEdge.x, roiEdge.y, roiEdge.width, roiEdge.height);
+      (new SwingWaitForUserDialog("User action required", "Sposta la ROI in modo che sia centrata\nnella parte centrale dell'EDGE e che questa la interesechi\nnei lati corti"))
+        
+        .show();
+      Rectangle roiEdge = this.imp.getProcessor().getRoi();
+      int n_col = roiEdge.width;
+      int l_righe = roiEdge.height;
+      float[][] tEdgeArray = new float[n_col][l_righe];
+      if (this.isVerticalEdge) {
+        EdgeArray = new float[n_col][l_righe];
+      } else {
+        EdgeArray = new float[l_righe][n_col];
+      } 
+      int xStart = roiEdge.x;
+      int yStart = roiEdge.y;
+      int xEnd = roiEdge.x + n_col;
+      int yEnd = roiEdge.y + l_righe;
+      int[] profilo = new int[n_col];
+      int m;
+      for (m = 0; m < l_righe; m++) {
+        this.imp.getProcessor().getRow(xStart, yStart + m, profilo, n_col);
+        for (int i11 = 0; i11 < n_col; i11++) {
+          if (this.isVerticalEdge) {
+            EdgeArray[i11][m] = Util.convertiInDose(this.A, this.B, this.isLinear, profilo[i11]);
+          } else {
+            tEdgeArray[i11][m] = Util.convertiInDose(this.A, this.B, this.isLinear, profilo[i11]);
+          } 
+        } 
+      } 
+      if (!this.isVerticalEdge) {
+        for (m = 0; m < l_righe; m++) {
+          for (int i11 = 0; i11 < n_col; i11++)
+            EdgeArray[m][i11] = tEdgeArray[i11][m]; 
+        } 
+        int scambio = n_col;
+        n_col = l_righe;
+        l_righe = scambio;
+      } 
+      IJ.showStatus("CALCOLO DELL'ANGOLO DELL'EDGE");
+      IJ.showProgress(1, 6);
+      ImageJ ij = IJ.getInstance();
+      ij.getProgressBar().show(1, 6);
+      float[] posHM = new float[l_righe];
+      int code = n_col / 10;
+      try {
+        for (int i11 = 0; i11 < l_righe; i11++) {
+          float mediasx = 0.0F;
+          float mediadx = 0.0F;
+          for (int i12 = 0; i12 < code; i12++) {
+            mediasx += EdgeArray[i12][i11];
+            mediadx += EdgeArray[n_col - 1 - i12][i11];
+          } 
+          mediasx /= code;
+          mediadx /= code;
+          float f1 = mediasx + (mediadx - mediasx) / 2.0F;
+          int iMax = 0;
+          if (mediasx < mediadx) {
+            while (EdgeArray[iMax][i11] < f1)
+              iMax++; 
+          } else {
+            while (EdgeArray[iMax][i11] > f1)
+              iMax++; 
+          } 
+          posHM[i11] = (iMax - 1) + (f1 - EdgeArray[iMax - 1][i11]) / (EdgeArray[iMax][i11] - EdgeArray[iMax - 1][i11]);
+        } 
+      } catch (Exception e) {
+        IJ.error("EDGE NON TROVATO!");
+        return;
+      } 
+      float xMed = ((l_righe - 1) / 2);
+      float yMed = 0.0F;
+      for (int i = 0; i < l_righe; i++)
+        yMed += posHM[i]; 
+      yMed /= l_righe;
+      float scXq = 0.0F;
+      float scXY = 0.0F;
+      for (int n = 0; n < l_righe; n++) {
+        scXq += (n - xMed) * (n - xMed);
+        scXY += (n - xMed) * (posHM[n] - yMed);
+      } 
+      float CoefAng = scXY / scXq;
+      float angolo = (float)Math.atan(CoefAng);
+      IJ.showStatus("L'inclinazione dell'oggetto di:" + IJ.d2s((angolo * 180.0F) / 3.14D) + " gradi");
+      float CosTeta = (float)Math.cos(angolo);
+      float SinTeta = (float)Math.sin(angolo);
+      int dimetotal = n_col * l_righe;
+      float[][] total = new float[dimetotal][2];
+      IJ.showStatus("PROIEZIONE DEI PROFILI");
+      IJ.showProgress(2, 6);
+      for (int i1 = 0; i1 < l_righe; i1++) {
+        for (int i11 = 0; i11 < n_col; i11++) {
+          total[i1 * n_col + i11][0] = i11 * CosTeta * dimPx - i1 * SinTeta * dimPx;
+          total[i1 * n_col + i11][1] = EdgeArray[i11][i1];
+        } 
+      } 
+      IJ.showStatus("Creazione del profilo super sampled");
+      total = Util.ordina(total, dimetotal);
+      float[] xValori0 = new float[dimetotal];
+      float[] yValori0 = new float[dimetotal];
+      float init = total[0][0];
+      for (int i2 = 0; i2 < dimetotal; i2++) {
+        total[i2][0] = total[i2][0] - init;
+        xValori0[i2] = total[i2][0];
+        yValori0[i2] = total[i2][1];
+      } 
+      PlotWindow pw = new PlotWindow("Pre Sampled Edge", "", "", xValori0, yValori0);
+      pw.draw();
+      IJ.showProgress(3, 6);
+      int k = 1;
+      int kmedia = 0;
+      float media = 0.0F;
+      float[][] DefEdge = new float[dimetotal][2];
+      float DeltaX = dimPx / 5.0F;
+      for (int j = 0; j < dimetotal; j++) {
+        if (total[j][0] < k * DeltaX) {
+          media += total[j][1];
+          kmedia++;
+        } else {
+          media /= kmedia;
+          DefEdge[k][1] = media;
+          DefEdge[k][0] = (k - 1) * DeltaX;
+          k++;
+          media = total[j][1];
+          kmedia = 1;
+        } 
+      } 
+      IJ.showStatus("Smoothing...");
+      k -= 3;
+      float[][] sDefEdge = new float[k][2];
+      for (int i3 = 1; i3 < k + 1; i3++) {
+        media = 0.0F;
+        for (int i11 = -1; i11 <= 1; i11++) {
+          float peso = (float)Math.exp((-(4 * i11 / 2) * 4 * i11 / 2));
+          media += peso * DefEdge[i3 + i11][1];
+        } 
+        media /= 1.036631F;
+        sDefEdge[i3 - 1][0] = DefEdge[i3][0];
+        sDefEdge[i3 - 1][1] = media;
+      } 
+      float[] xValori = new float[k];
+      float[] yValori = new float[k];
+      for (int i4 = 0; i4 < k; i4++) {
+        xValori[i4] = sDefEdge[i4][0];
+        yValori[i4] = sDefEdge[i4][1];
+      } 
+      pw = new PlotWindow("Pre Sampled Edge  smoothed (media mobile con pesi gaussiani su 5 punti", "", "", xValori, yValori);
+      pw.draw();
+      IJ.showProgress(4, 6);
+      float segno = 0.0F;
+      if (DefEdge[1][1] < DefEdge[k - 1][1]) {
+        segno = 1.0F;
+      } else {
+        segno = -1.0F;
+      } 
+      IJ.showStatus("CALCOLO DELLA LSF...");
+      float[][] lsf = new float[k - 2][2];
+      for (int i5 = 0; i5 < k - 2; i5++) {
+        lsf[i5][1] = segno * (sDefEdge[i5 + 2][1] - sDefEdge[i5][1]) / 2.0F * DeltaX;
+        lsf[i5][0] = sDefEdge[i5 + 1][0];
+      } 
+      k -= 2;
+      float continua = 0.0F;
+      code = k / 10;
+      media = 0.0F;
+      float mediaSG = 0.0F;
+      for (int i6 = 0; i6 < code; i6++)
+        media = media + lsf[k - 1 - i6][1] + lsf[i6][1]; 
+      continua = media / (2 * code);
+      float max = 0.0F;
+      float maxSG = 0.0F;
+      int posMax = 0;
+      int i7;
+      for (i7 = 0; i7 < k; i7++) {
+        lsf[i7][1] = lsf[i7][1] - continua;
+        if (lsf[i7][1] > max) {
+          max = lsf[i7][1];
+          posMax = i7;
+        } 
+      } 
+      for (i7 = 0; i7 < k; i7++)
+        lsf[i7][1] = lsf[i7][1] / max; 
+      for (i7 = 0; i7 < k; i7++) {
+        xValori[i7] = lsf[i7][0];
+        yValori[i7] = lsf[i7][1];
+      } 
+      yValori[k] = 0.0F;
+      yValori[k + 1] = 0.0F;
+      IJ.showProgress(5, 6);
+      float[][] arraydft = new float[k][2];
+      float argomento = 0.0F;
+      IJ.showStatus("CALCOLO DELLA TRASFORMATA DI FOURIER...");
+      for (int i8 = 0; i8 < k; i8++) {
+        arraydft[i8][0] = 0.0F;
+        arraydft[i8][1] = 0.0F;
+        for (int i11 = 0; i11 < k; i11++) {
+          argomento = (float)(6.283185307179586D * i11 * i8 / k);
+          arraydft[i8][0] = arraydft[i8][0] + (float)(lsf[i11][1] * Math.cos(argomento));
+          arraydft[i8][1] = arraydft[i8][1] - (float)(lsf[i11][1] * Math.sin(argomento));
+        } 
+      } 
+      int nf2 = k / 2;
+      float[] mag = new float[nf2];
+      for (int i9 = 0; i9 < nf2; i9++)
+        mag[i9] = (float)Math.sqrt((arraydft[i9][0] * arraydft[i9][0] + arraydft[i9][1] * arraydft[i9][1])); 
+      float DeltafMTF = 1.0F / k * DeltaX;
+      int NPointsMTF = (int)(14.0F / DeltafMTF);
+      float[] xMTF = new float[NPointsMTF];
+      float[] yMTF = new float[NPointsMTF];
+      if (nf2 < NPointsMTF)
+        NPointsMTF = nf2; 
+      for (int i10 = 0; i10 < NPointsMTF; i10++) {
+        xMTF[i10] = i10 * DeltafMTF;
+        yMTF[i10] = mag[i10] / mag[0];
+      } 
+      IJ.showProgress(6, 6);
+      IJ.showStatus("MTF calcolata");
+      pw = new PlotWindow("MTF", "Frequence (lp/mm)", "MTF", xMTF, yMTF);
+      PlotWindow.noGridLines = false;
+      pw.draw();
+      Plot plot = pw.getPlot();
+      plot.getResultsTable(true).show("MTF");
+      IJ.error("\nMTF50 (full freq) is " + IJ.d2s(Util.lpmmValueAt(xMTF, yMTF, 0.5F)) + "\nMTF10 (full freq) is " + 
+          IJ.d2s(Util.lpmmValueAt(xMTF, yMTF, 0.1F)));
+    } 
+  }
+  
+  public boolean dialogItemChanged(GenericDialog gd, AWTEvent awte) {
+    return Util.validaDialogDose(gd, awte);
+  }
+}

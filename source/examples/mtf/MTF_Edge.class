@@ -1,0 +1,1008 @@
+package it.plugins.mammo.mtf;
+
+import fiji.analyze.directionality.Directionality_;
+import ij.IJ;
+import ij.ImageJ;
+import ij.ImagePlus;
+import ij.WindowManager;
+import ij.gui.DialogListener;
+import ij.gui.GenericDialog;
+import ij.gui.Line;
+import ij.gui.Plot;
+import ij.gui.PlotWindow;
+import ij.gui.ProfilePlot;
+import ij.gui.Roi;
+import ij.measure.ResultsTable;
+import ij.plugin.PlugIn;
+import ij.process.ImageProcessor;
+import it.plugins.util.CustomComboBox;
+import it.plugins.util.CustomDialog;
+import it.plugins.util.ExcelAdapter;
+import it.plugins.util.ImageInfo;
+import it.plugins.util.JTableUtilities;
+import it.plugins.util.ProgressBar;
+import it.plugins.util.ResponseInfo;
+import it.plugins.util.SelfValidatingTextField;
+import it.plugins.util.SwingWaitForUserDialog;
+import it.plugins.util.Util;
+import it.plugins.util.Validable;
+import java.awt.AWTEvent;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.LayoutManager;
+import java.awt.Rectangle;
+import java.awt.Window;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.io.IOException;
+import java.text.DecimalFormat;
+import java.text.NumberFormat;
+import java.text.ParseException;
+import java.text.ParsePosition;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.Vector;
+import javax.swing.DefaultCellEditor;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JFileChooser;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.JTextField;
+import javax.swing.UIManager;
+import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.table.JTableHeader;
+import javax.swing.table.TableCellRenderer;
+import manifold.internal.runtime.Bootstrap;
+import net.miginfocom.swing.MigLayout;
+import org.knowm.xchart.XChartPanel;
+import org.knowm.xchart.XYChart;
+import org.knowm.xchart.XYChartBuilder;
+import org.knowm.xchart.XYSeries;
+import org.knowm.xchart.internal.chartpart.Chart;
+import org.knowm.xchart.style.GGPlot2Theme;
+import org.knowm.xchart.style.Styler;
+import org.knowm.xchart.style.XYStyler;
+import org.knowm.xchart.style.markers.SeriesMarkers;
+
+public class MTF_Edge implements PlugIn, DialogListener {
+  private Float A;
+  
+  private Float B;
+  
+  private boolean isLinear;
+  
+  private boolean isLog;
+  
+  private boolean isVerticalEdge;
+  
+  static {
+    Bootstrap.init();
+  }
+  
+  private String[] choices = new String[] { Util.getStringMessage("vertical_edge_choice", new Object[0]), 
+      Util.getStringMessage("horizzontal_edge_choice", new Object[0]) };
+  
+  private ImagePlus imp;
+  
+  private JPanel contentPane;
+  
+  public void run(String string) {
+    Window[] finestreNonImmagini = WindowManager.getAllNonImageWindows();
+    for (Window w : finestreNonImmagini)
+      w.dispose(); 
+    MTF();
+  }
+  
+  public void MTF() {
+    ImageInfo imageInfo;
+    ImagePlus aperta = WindowManager.getCurrentImage();
+    try {
+      for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
+        if ("Nimbus".equals(info.getName())) {
+          UIManager.setLookAndFeel(info.getClassName());
+          break;
+        } 
+      } 
+    } catch (Exception e) {
+      try {
+        UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+      } catch (Exception ex) {
+        System.out.println("Error setting Java LAF: " + ex);
+      } 
+    } 
+    UIManager.getSystemLookAndFeelClassName();
+    if (aperta != null) {
+      imageInfo = Util.OpenSingleImage(true);
+    } else {
+      imageInfo = Util.OpenSingleImage();
+    } 
+    if (imageInfo == null) {
+      JOptionPane.showMessageDialog(null, Util.getStringMessage("closed_single_dialog_error", new Object[0]), "Error", 0);
+      WindowManager.closeAllWindows();
+      return;
+    } 
+    this.imp = imageInfo.getImmagine();
+    this.imp.show();
+    if (!Util.isImageOpened()) {
+      IJ.noImage();
+    } else {
+      float[][] EdgeArray;
+      ResponseInfo ri = Util.correggiDose();
+      if (ri == null) {
+        WindowManager.closeAllWindows();
+        return;
+      } 
+      this.A = ri.getA();
+      this.B = ri.getB();
+      this.isLinear = ri.isIsLinear();
+      this.isLog = ri.isIsLog();
+      float dimPx = Util.getPixelDimensionFromHeader(this.imp);
+      String[] messaggi = { "PLEASE insert/modify the pixel pitch", "and the binning frequency (mm};
+      String titolo = "INFO FOR PROCESSING";
+      final SelfValidatingTextField pixelField = new SelfValidatingTextField(6, "Please insert a valid pixel dimension", "Pixel Pitch (mm): ");
+      NumberFormat decimalFormatPixel = new DecimalFormat("0.000");
+      pixelField.setPlaceholder(decimalFormatPixel.format(dimPx));
+      pixelField.setValidator(new Validable() {
+            public boolean selfValidate() {
+              try {
+                if (pixelField.getText().isEmpty())
+                  return true; 
+                double value = Double.parseDouble(pixelField.getText());
+                if (value < 0.0D)
+                  return false; 
+                pixelField.setText(Util.decimalFormatCoef.format(value));
+                return true;
+              } catch (Exception e) {
+                try {
+                  ParsePosition pp = new ParsePosition(0);
+                  Number result = Util.decimalFormatCoef.parse(pixelField.getText(), pp);
+                  if (pp.getIndex() != pixelField.getText().length())
+                    return false; 
+                  double value = result.doubleValue();
+                  if (value < 0.0D)
+                    return false; 
+                  pixelField.setText(Util.decimalFormatCoef.format(value));
+                  return true;
+                } catch (Exception e2) {
+                  return false;
+                } 
+              } 
+            }
+          });
+      float DeltaEuref = 0.25F;
+      SelfValidatingTextField[] campi = { pixelField };
+      String dieci = Util.decimalFormatEsak.format(0.1D);
+      String venticinque = Util.decimalFormatEsak.format(0.25D);
+      String cinquanta = Util.decimalFormatEsak.format(0.5D);
+      String[] binOptions = { dieci + " mm, venticinque + " mm, cinquanta + " mm};
+      JComboBox<String> combo = new JComboBox<>(binOptions);
+      combo.setSelectedItem(binOptions[1]);
+      JLabel labelBin = new JLabel("Re-binning frequency");
+      CustomComboBox customCombo = new CustomComboBox(combo, labelBin);
+      CustomDialog customDialog = new CustomDialog(null, titolo, messaggi, campi, null, null, customCombo);
+      customDialog.setLocationRelativeTo(null);
+      customDialog.pack();
+      customDialog.setVisible(true);
+      int bottone = customDialog.getReturnValue();
+      if (bottone == 1 || bottone == 2) {
+        WindowManager.closeAllWindows();
+        return;
+      } 
+      String valore = pixelField.getText();
+      try {
+        if (valore != null)
+          dimPx = decimalFormatPixel.parse(valore).floatValue(); 
+      } catch (ParseException e) {
+        e.printStackTrace();
+      } 
+      valore = (String)combo.getSelectedItem();
+      try {
+        DeltaEuref = Util.decimalFormatEsak.parse(valore).floatValue();
+      } catch (Exception e) {
+        e.printStackTrace();
+      } 
+      int centroX = WindowManager.getCurrentImage().getWidth() / 2;
+      int centroY = WindowManager.getCurrentImage().getHeight() / 2;
+      final SelfValidatingTextField roiSize = new SelfValidatingTextField(6, "Please enter a valid ROI size", "ROI size (mm): ");
+      String[] messaggiRoi = { "PLEASE select the ROI size" };
+      String titoloRoi = "ROI definition";
+      roiSize.setPlaceholder(Util.decimalFormatKV.format(40.0D));
+      roiSize.setValidator(new Validable() {
+            public boolean selfValidate() {
+              try {
+                if (roiSize.getText().isEmpty()) {
+                  roiSize.setText(Util.decimalFormatKV.format(40.0D));
+                  JOptionPane.showMessageDialog(null, "PLEASE PAY ATTENTION\nAnalysis will be performed using a default ROI of 40 mm x 40 mm");
+                  return true;
+                } 
+                double value = Double.parseDouble(roiSize.getText());
+                if (value == 0.0D) {
+                  JOptionPane.showMessageDialog(null, Util.getStringMessage("error! The ROI size cannot be " + Util.zero, new Object[0]), "Error!", 0);
+                  roiSize.setPlaceholder(Util.decimalFormatKV.format(40.0D));
+                  return false;
+                } 
+                roiSize.setText(Util.decimalFormatKV.format(value));
+                return true;
+              } catch (Exception e) {
+                try {
+                  ParsePosition pp = new ParsePosition(0);
+                  Number result = Util.decimalFormatKV.parse(roiSize.getText(), pp);
+                  if (pp.getIndex() != roiSize.getText().length())
+                    return false; 
+                  double value = result.doubleValue();
+                  if (value == 0.0D) {
+                    JOptionPane.showMessageDialog(null, Util.getStringMessage("error! ROI size cannot be " + Util.zero, new Object[0]), "Error!", 0);
+                    roiSize.setText(Util.decimalFormatKV.format(40.0D));
+                    return false;
+                  } 
+                  roiSize.setText(Util.decimalFormatKV.format(value));
+                  return true;
+                } catch (Exception e2) {
+                  return false;
+                } 
+              } 
+            }
+          });
+      SelfValidatingTextField[] campiRoi = { roiSize };
+      CustomDialog customDialogRoi = new CustomDialog("", null, titoloRoi, messaggiRoi, campiRoi, null, null, null);
+      int roiDim = 40;
+      customDialogRoi.setLocationRelativeTo(null);
+      customDialogRoi.pack();
+      customDialogRoi.setVisible(true);
+      bottone = customDialog.getReturnValue();
+      if (bottone == 1 || bottone == 2) {
+        customDialogRoi.dispose();
+        JOptionPane.showMessageDialog(null, "PLEASE PAY ATTENTION\nAnalysis will be performed using a default ROI of 40 mm x 40 mm");
+      } else {
+        valore = roiSize.getText();
+        try {
+          if (valore == null) {
+            roiDim = 40;
+          } else {
+            roiDim = Util.decimalFormatKV.parse(valore).intValue();
+          } 
+        } catch (ParseException e) {
+          e.printStackTrace();
+        } 
+      } 
+      Rectangle roiEdge = new Rectangle(centroX, centroY, (int)(roiDim / dimPx), (int)(roiDim / dimPx));
+      IJ.makeRectangle(roiEdge.x, roiEdge.y, roiEdge.width, roiEdge.height);
+      (new SwingWaitForUserDialog("User action required", 
+          Util.getStringMessage("ROI_user_EDGE_message", new Object[0]))).show();
+      roiEdge = this.imp.getProcessor().getRoi();
+      this.imp.setRoi(roiEdge);
+      ImageProcessor roiProc = this.imp.getProcessor();
+      roiProc.setRoi(roiEdge);
+      roiProc = roiProc.crop();
+      final ProgressBar myProgressBar = new ProgressBar();
+      myProgressBar.setValues(0.1D, "Finding edge orientation...", 400L);
+      Directionality_ dir = new Directionality_();
+      dir.setImagePlus(new ImagePlus("directionalilty", roiProc));
+      dir.setMethod(Directionality_.AnalysisMethod.FOURIER_COMPONENTS);
+      dir.setBinNumber(90);
+      dir.setBinStart(-90.0D);
+      dir.setBinRange(-90.0D, 90.0D);
+      dir.computeHistograms();
+      dir.fitHistograms();
+      ArrayList<double[]> fitParams = dir.getFitAnalysis();
+      double[] params = fitParams.get(0);
+      double peak = Math.toDegrees(params[0]);
+      this.isVerticalEdge = (Math.abs(peak) > 45.0D);
+      int numPixelIn40mm = (int)(40.0F / dimPx);
+      if (this.isVerticalEdge) {
+        int y_linea_centrale = roiEdge.y + roiEdge.height / 2;
+        int x_linea_centrale = roiEdge.x;
+        Line line = new Line(x_linea_centrale, y_linea_centrale, x_linea_centrale + roiEdge.width, y_linea_centrale);
+        this.imp.setRoi((Roi)line);
+        ProfilePlot profiloLinea = new ProfilePlot(this.imp);
+        this.imp.setRoi(roiEdge);
+        double[] arrayOfDouble = profiloLinea.getProfile();
+        int i21 = arrayOfDouble.length;
+        float[] arrayOfFloat = new float[i21 - 2];
+        float f1 = 0.0F;
+        if (arrayOfDouble[0] < arrayOfDouble[i21 - 1]) {
+          f1 = 1.0F;
+        } else {
+          f1 = -1.0F;
+        } 
+        float f2 = 0.0F;
+        int i22 = 0;
+        for (int i23 = 0; i23 < i21 - 2; i23++) {
+          arrayOfFloat[i23] = (float)(f1 * (arrayOfDouble[i23 + 2] - arrayOfDouble[i23]) / (2.0F * dimPx));
+          if (arrayOfFloat[i23] > f2) {
+            f2 = arrayOfFloat[i23];
+            i22 = i23;
+          } 
+        } 
+        i22 += x_linea_centrale;
+        int posCentrale = x_linea_centrale + roiEdge.width / 2;
+        int tolleranza = roiEdge.width / 2;
+        int minPos = i22 - tolleranza / 2;
+        int maxPos = i22 + tolleranza / 2;
+        if (Math.abs(posCentrale - roiEdge.y) < 512 || Math.abs(posCentrale - roiEdge.y + roiEdge.height) < 512) {
+          JOptionPane.showMessageDialog(null, "ROI is not sufficiently centred on edge.\nThe software will automatically centre it);
+          int scarto = Math.abs(posCentrale - i22);
+          int newX = (posCentrale < minPos) ? (roiEdge.x + scarto) : (roiEdge.x - scarto);
+          roiEdge = new Rectangle(newX, roiEdge.y, roiEdge.width, roiEdge.height);
+          this.imp.setRoi(roiEdge);
+        } 
+      } else {
+        int y_linea_centrale = roiEdge.y;
+        int x_linea_centrale = roiEdge.x + roiEdge.width / 2;
+        Line line = new Line(x_linea_centrale, y_linea_centrale, x_linea_centrale, y_linea_centrale + roiEdge.height);
+        this.imp.setRoi((Roi)line);
+        ProfilePlot profiloLinea = new ProfilePlot(this.imp);
+        this.imp.setRoi(roiEdge);
+        double[] arrayOfDouble = profiloLinea.getProfile();
+        int i21 = arrayOfDouble.length;
+        float[] arrayOfFloat = new float[i21 - 2];
+        float f1 = 0.0F;
+        if (arrayOfDouble[0] < arrayOfDouble[i21 - 1]) {
+          f1 = 1.0F;
+        } else {
+          f1 = -1.0F;
+        } 
+        float f2 = 0.0F;
+        int i22 = 0;
+        for (int i23 = 0; i23 < i21 - 2; i23++) {
+          arrayOfFloat[i23] = (float)(f1 * (arrayOfDouble[i23 + 2] - arrayOfDouble[i23]) / (2.0F * dimPx));
+          if (arrayOfFloat[i23] > f2) {
+            f2 = arrayOfFloat[i23];
+            i22 = i23;
+          } 
+        } 
+        i22 += y_linea_centrale;
+        int posCentrale = y_linea_centrale + roiEdge.height / 2;
+        int tolleranza = roiEdge.height / 2;
+        int minPos = i22 - tolleranza / 2;
+        int maxPos = i22 + tolleranza / 2;
+        if (Math.abs(posCentrale - roiEdge.y) < 512 || Math.abs(posCentrale - roiEdge.y + roiEdge.height) < 512) {
+          JOptionPane.showMessageDialog(null, "Roi is not sufficiently centerd on edge.\nTrying to automatically center it...");
+          int scarto = Math.abs(posCentrale - i22);
+          int newY = (posCentrale < minPos) ? (roiEdge.y + scarto) : (roiEdge.y - scarto);
+          roiEdge = new Rectangle(roiEdge.x, newY, roiEdge.width, roiEdge.height);
+          this.imp.setRoi(roiEdge);
+        } 
+      } 
+      int n_col = roiEdge.width;
+      int l_righe = roiEdge.height;
+      float[][] tEdgeArray = new float[n_col][l_righe];
+      if (this.isVerticalEdge) {
+        EdgeArray = new float[n_col][l_righe];
+      } else {
+        EdgeArray = new float[l_righe][n_col];
+      } 
+      myProgressBar.setValues(0.2D, "getting edge profiles...", 400L);
+      int xStart = roiEdge.x;
+      int yStart = roiEdge.y;
+      int xEnd = roiEdge.x + n_col;
+      int yEnd = roiEdge.y + l_righe;
+      int[] profilo = new int[n_col];
+      int m;
+      for (m = 0; m < l_righe; m++) {
+        this.imp.getProcessor().getRow(xStart, yStart + m, profilo, n_col);
+        for (int i21 = 0; i21 < n_col; i21++) {
+          if (this.isVerticalEdge) {
+            EdgeArray[i21][m] = Util.convertiInDose(this.A, this.B, this.isLinear, profilo[i21]);
+          } else {
+            tEdgeArray[i21][m] = Util.convertiInDose(this.A, this.B, this.isLinear, profilo[i21]);
+          } 
+        } 
+      } 
+      if (!this.isVerticalEdge) {
+        for (m = 0; m < l_righe; m++) {
+          for (int i21 = 0; i21 < n_col; i21++)
+            EdgeArray[m][i21] = tEdgeArray[i21][m]; 
+        } 
+        int scambio = n_col;
+        n_col = l_righe;
+        l_righe = scambio;
+      } 
+      myProgressBar.setValues(0.3D, "Determining edge angle...", 400L);
+      IJ.showStatus(Util.getStringMessage("EDGE_angle_calc_message", new Object[0]));
+      IJ.showProgress(1, 6);
+      ImageJ ij = IJ.getInstance();
+      ij.getProgressBar().show(1, 6);
+      float[] posHM = new float[l_righe];
+      int code = n_col / 10;
+      try {
+        for (int i21 = 0; i21 < l_righe; i21++) {
+          float mediasx = 0.0F;
+          float mediadx = 0.0F;
+          for (int i22 = 0; i22 < code; i22++) {
+            mediasx += EdgeArray[i22][i21];
+            mediadx += EdgeArray[n_col - 1 - i22][i21];
+          } 
+          mediasx /= code;
+          mediadx /= code;
+          float f1 = mediasx + (mediadx - mediasx) / 2.0F;
+          int iMax = 0;
+          if (mediasx < mediadx) {
+            while (EdgeArray[iMax][i21] < f1)
+              iMax++; 
+          } else {
+            while (EdgeArray[iMax][i21] > f1)
+              iMax++; 
+          } 
+          posHM[i21] = (iMax - 1) + (f1 - EdgeArray[iMax - 1][i21]) / (EdgeArray[iMax][i21] - EdgeArray[iMax - 1][i21]);
+        } 
+      } catch (Exception e) {
+        JOptionPane.showMessageDialog(null, Util.getStringMessage("EDGE_not_found_error", new Object[0]), "Error", 0);
+        if (myProgressBar != null)
+          myProgressBar.closeDialog(); 
+        return;
+      } 
+      float xMed = ((l_righe - 1) / 2);
+      float yMed = 0.0F;
+      for (int i = 0; i < l_righe; i++)
+        yMed += posHM[i]; 
+      yMed /= l_righe;
+      float scXq = 0.0F;
+      float scXY = 0.0F;
+      for (int n = 0; n < l_righe; n++) {
+        scXq += (n - xMed) * (n - xMed);
+        scXY += (n - xMed) * (posHM[n] - yMed);
+      } 
+      float CoefAng = scXY / scXq;
+      float angolo = (float)Math.atan(CoefAng);
+      IJ.showStatus(Util.getStringMessage("EDGE_angle", new Object[0]) + IJ.d2s((angolo * 180.0F) / 3.14D) + " );
+      System.err.println(Util.getStringMessage("EDGE_angle", new Object[0]) + IJ.d2s((angolo * 180.0F) / 3.14D) + " );
+      float CosTeta = (float)Math.cos(angolo);
+      float SinTeta = (float)Math.sin(angolo);
+      int dimetotal = n_col * l_righe;
+      float[][] total = new float[dimetotal][2];
+      TreeMap<Double, Double> mapTotal = new TreeMap<>();
+      IJ.showStatus(Util.getStringMessage("PROFILE_PROJECTION_message", new Object[0]));
+      IJ.showProgress(2, 6);
+      myProgressBar.setValues(0.4D, "Projecting edge profiles...", 400L);
+      for (int i1 = 0; i1 < l_righe; i1++) {
+        for (int i21 = 0; i21 < n_col; i21++) {
+          total[i1 * n_col + i21][0] = i21 * CosTeta * dimPx - i1 * SinTeta * dimPx;
+          double x = (i21 * CosTeta * dimPx - i1 * SinTeta * dimPx);
+          total[i1 * n_col + i21][1] = EdgeArray[i21][i1];
+          double pv = EdgeArray[i21][i1];
+          mapTotal.put(Double.valueOf(x), Double.valueOf(pv));
+        } 
+      } 
+      IJ.showStatus(Util.getStringMessage("SUPERSAMPLE_PROFILE_message", new Object[0]));
+      Set<Double> keySet = mapTotal.keySet();
+      float[][] totalFromMap = new float[dimetotal][2];
+      total = new float[dimetotal][2];
+      int counter = 0;
+      for (Iterator<Double> iterator = keySet.iterator(); iterator.hasNext(); ) {
+        double x = ((Double)iterator.next()).doubleValue();
+        totalFromMap[counter][0] = (float)x;
+        totalFromMap[counter][1] = ((Double)mapTotal.get(Double.valueOf(x))).floatValue();
+        total[counter][0] = (float)x;
+        total[counter][1] = ((Double)mapTotal.get(Double.valueOf(x))).floatValue();
+        counter++;
+      } 
+      float[] xValori0 = new float[dimetotal];
+      float[] yValori0 = new float[dimetotal];
+      float init = total[0][0];
+      for (int i2 = 0; i2 < dimetotal; i2++) {
+        total[i2][0] = total[i2][0] - init;
+        xValori0[i2] = total[i2][0];
+        yValori0[i2] = total[i2][1];
+      } 
+      Plot pw1 = new Plot(Util.getStringMessage("PreSample_edge_plot_title", new Object[0]), "", "", xValori0, yValori0);
+      GGPlot2Theme ggPlot2Theme = new GGPlot2Theme();
+      Font titleFont = ggPlot2Theme.getChartTitleFont();
+      Font axisFont = ggPlot2Theme.getAxisTitleFont();
+      Color mtfColor = new Color(5515151);
+      XYChart chart1 = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(500)).height(400)).theme(Styler.ChartTheme.XChart)).title(Util.getStringMessage("PreSample_edge_plot_title", new Object[0]))).xAxisTitle("").yAxisTitle("").build();
+      ((XYStyler)chart1.getStyler()).setSeriesColors(new Color[] { Color.BLACK });
+      ((XYStyler)chart1.getStyler()).setChartBackgroundColor(Color.WHITE);
+      ((XYStyler)chart1.getStyler()).setAxisTitleFont(axisFont);
+      ((XYStyler)chart1.getStyler()).setChartTitleFont(titleFont);
+      ((XYStyler)chart1.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+      ((XYStyler)chart1.getStyler()).setChartTitleBoxVisible(true);
+      ((XYStyler)chart1.getStyler()).setPlotBorderVisible(false);
+      XYSeries preSampledSeries = chart1.addSeries("Pre-Sample Edge", xValori0, yValori0);
+      preSampledSeries.setLineWidth(0.5F);
+      preSampledSeries.setMarker(SeriesMarkers.NONE);
+      ((XYStyler)chart1.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+      XChartPanel chart1Panel = new XChartPanel((Chart)chart1);
+      IJ.showProgress(3, 6);
+      myProgressBar.setValues(0.45D, "resampling the ESF...", 400L);
+      int k = 1;
+      int kmedia = 0;
+      float media = 0.0F;
+      float[][] DefEdge = new float[dimetotal][2];
+      float DeltaX = dimPx / 10.0F;
+      for (int j = 0; j < dimetotal; j++) {
+        if (total[j][0] < k * DeltaX) {
+          media += total[j][1];
+          kmedia++;
+        } else {
+          media /= kmedia;
+          DefEdge[k][1] = media;
+          DefEdge[k][0] = (k - 1) * DeltaX;
+          k++;
+          media = total[j][1];
+          kmedia = 1;
+        } 
+      } 
+      IJ.showStatus("Smoothing...");
+      myProgressBar.setValues(0.5D, "Smooting the ESF...", 400L);
+      k -= 5;
+      float[][] sDefEdge = new float[k][2];
+      double mediana = 0.0D;
+      double[] valori = new double[5];
+      for (int i3 = 2; i3 < k + 2; i3++) {
+        media = 0.0F;
+        for (int i21 = -2; i21 <= 2; i21++) {
+          float peso = (float)Math.exp((-(4 * i21 / 2) * 4 * i21 / 2));
+          valori[i21 + 2] = DefEdge[i3 + i21][1];
+        } 
+        mediana = Util.median(valori);
+        media /= 1.036631F;
+        sDefEdge[i3 - 2][0] = DefEdge[i3][0];
+        sDefEdge[i3 - 2][1] = (float)mediana;
+      } 
+      float[] xValori = new float[k];
+      float[] yValori = new float[k];
+      for (int i4 = 0; i4 < k; i4++) {
+        xValori[i4] = sDefEdge[i4][0];
+        yValori[i4] = sDefEdge[i4][1];
+      } 
+      Plot pw2 = new Plot(Util.getStringMessage("Smoothed_PreSample_plot_title", new Object[0]), "", "", xValori, yValori);
+      XYChart chart2 = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(500)).height(400)).theme(Styler.ChartTheme.XChart)).title(Util.getStringMessage("Smoothed_PreSample_plot_title", new Object[0]))).xAxisTitle("").yAxisTitle("").build();
+      ((XYStyler)chart2.getStyler()).setSeriesColors(new Color[] { Color.BLACK });
+      ((XYStyler)chart2.getStyler()).setChartBackgroundColor(Color.WHITE);
+      ((XYStyler)chart2.getStyler()).setAxisTitleFont(axisFont);
+      ((XYStyler)chart2.getStyler()).setChartTitleFont(titleFont);
+      ((XYStyler)chart2.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+      ((XYStyler)chart2.getStyler()).setChartTitleBoxVisible(true);
+      ((XYStyler)chart2.getStyler()).setPlotBorderVisible(false);
+      XYSeries smootehdSeries = chart2.addSeries("Smoothed ESF", xValori, yValori);
+      smootehdSeries.setLineWidth(0.5F);
+      smootehdSeries.setMarker(SeriesMarkers.NONE);
+      ((XYStyler)chart2.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+      XChartPanel chart2Panel = new XChartPanel((Chart)chart2);
+      IJ.showProgress(4, 6);
+      myProgressBar.setValues(0.6D, "Computing the LSF...", 400L);
+      float segno = 0.0F;
+      if (DefEdge[1][1] < DefEdge[k - 1][1]) {
+        segno = 1.0F;
+      } else {
+        segno = -1.0F;
+      } 
+      IJ.showStatus(Util.getStringMessage("LSF_calc_message", new Object[0]));
+      float[][] lsf = new float[k - 2][2];
+      for (int i5 = 1; i5 < k - 2; i5++) {
+        lsf[i5 - 1][1] = segno * (sDefEdge[i5 + 1][1] - sDefEdge[i5 - 1][1]) / 2.0F * DeltaX;
+        lsf[i5 - 1][0] = sDefEdge[i5 + 1][0];
+      } 
+      k -= 2;
+      myProgressBar.setValues(0.7D, "elimination of the continuous component of the LSF curve...", 400L);
+      float continua = 0.0F;
+      code = k / 10;
+      media = 0.0F;
+      float mediaSG = 0.0F;
+      for (int i6 = 0; i6 < code; i6++)
+        media = media + lsf[k - 1 - i6][1] + lsf[i6][1]; 
+      continua = media / (2 * code);
+      float max = 0.0F;
+      float maxSG = 0.0F;
+      int posMax = 0;
+      for (int i7 = 0; i7 < k; i7++) {
+        lsf[i7][1] = lsf[i7][1] - continua;
+        if (lsf[i7][1] > max) {
+          max = lsf[i7][1];
+          posMax = i7;
+        } 
+      } 
+      float sum = 0.0F;
+      int i8;
+      for (i8 = 0; i8 < k; i8++)
+        sum += lsf[i8][1]; 
+      sum /= k;
+      for (i8 = 0; i8 < k; i8++)
+        lsf[i8][1] = lsf[i8][1] / sum; 
+      for (i8 = 0; i8 < k; i8++) {
+        if (lsf[i8][1] > max) {
+          max = lsf[i8][1];
+          posMax = i8;
+        } 
+      } 
+      for (i8 = 0; i8 < k; i8++)
+        lsf[i8][1] = lsf[i8][1] / max; 
+      for (i8 = 0; i8 < k; i8++) {
+        xValori[i8] = lsf[i8][0];
+        yValori[i8] = lsf[i8][1];
+      } 
+      yValori[k] = 0.0F;
+      yValori[k + 1] = 0.0F;
+      IJ.showProgress(5, 6);
+      float[][] lsfHann = new float[k][2];
+      for (int i9 = 0; i9 < k; i9++) {
+        lsfHann[i9][0] = lsf[i9][0];
+        lsfHann[i9][1] = lsf[i9][1];
+      } 
+      int sizeHann = (int)(25.0F / DeltaX);
+      int pos = posMax - sizeHann / 2;
+      int i10;
+      for (i10 = pos; i10 < pos + sizeHann; i10++) {
+        int i21 = i10 - pos;
+        lsfHann[i10][1] = (float)(lsfHann[i10][1] * 0.5D * (1.0D - Math.cos(6.283185307179586D * i21 / (sizeHann - 1))));
+      } 
+      for (i10 = 0; i10 < pos; i10++)
+        lsfHann[i10][1] = 0.0F; 
+      for (i10 = pos + sizeHann; i10 < k; i10++)
+        lsfHann[i10][1] = 0.0F; 
+      float[] xValori2 = new float[1024];
+      float[] yValori2 = new float[1024];
+      k = 1024;
+      for (int i11 = 0; i11 < k; i11++)
+        yValori[i11] = lsfHann[i11][1]; 
+      pos = posMax - 512;
+      int c2 = 0;
+      for (int i12 = pos; i12 < pos + 1024; i12++) {
+        xValori2[c2] = xValori[i12];
+        yValori2[c2] = yValori[i12];
+        c2++;
+      } 
+      float xAtMax = xValori2[512];
+      for (int i13 = 0; i13 < 1024; i13++)
+        xValori2[i13] = xValori2[i13] - xAtMax; 
+      Plot pw3 = new Plot(Util.getStringMessage("LSF_plot_title", new Object[0]), "", "", xValori2, yValori2);
+      XYChart chart3 = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(500)).height(400)).theme(Styler.ChartTheme.XChart)).title(Util.getStringMessage("LSF_plot_title", new Object[0]))).xAxisTitle("").yAxisTitle("").build();
+      ((XYStyler)chart3.getStyler()).setSeriesColors(new Color[] { Color.BLACK });
+      ((XYStyler)chart3.getStyler()).setChartBackgroundColor(Color.WHITE);
+      ((XYStyler)chart3.getStyler()).setAxisTitleFont(axisFont);
+      ((XYStyler)chart3.getStyler()).setChartTitleFont(titleFont);
+      ((XYStyler)chart3.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+      ((XYStyler)chart3.getStyler()).setChartTitleBoxVisible(true);
+      ((XYStyler)chart3.getStyler()).setPlotBorderVisible(false);
+      XYSeries lsfSeries = chart3.addSeries("LSF", xValori2, yValori2);
+      lsfSeries.setLineWidth(0.5F);
+      lsfSeries.setMarker(SeriesMarkers.NONE);
+      ((XYStyler)chart3.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+      XChartPanel chart3Panel = new XChartPanel((Chart)chart3);
+      float[][] arraydft = new float[k][2];
+      float argomento = 0.0F;
+      IJ.showStatus(Util.getStringMessage("MTF_Fourier_calc_message", new Object[0]));
+      myProgressBar.setValues(0.8D, "Computing pMTF...", 500L);
+      for (int i14 = 0; i14 < k; i14++) {
+        arraydft[i14][0] = 0.0F;
+        arraydft[i14][1] = 0.0F;
+        for (int i21 = 0; i21 < k; i21++) {
+          argomento = (float)(6.283185307179586D * i21 * i14 / k);
+          arraydft[i14][0] = arraydft[i14][0] + (float)(yValori2[i21] * Math.cos(argomento));
+          arraydft[i14][1] = arraydft[i14][1] - (float)(yValori2[i21] * Math.sin(argomento));
+        } 
+      } 
+      int nf2 = k / 2;
+      float[] mag = new float[nf2];
+      for (int i15 = 0; i15 < nf2; i15++)
+        mag[i15] = (float)Math.sqrt((arraydft[i15][0] * arraydft[i15][0] + arraydft[i15][1] * arraydft[i15][1])); 
+      float DeltafMTF = 1.0F / k * DeltaX;
+      int NPointsMTF = (int)(14.0F / DeltafMTF);
+      int totaleBin = (int)(14.0F / DeltaEuref);
+      float[] xMTF = new float[NPointsMTF];
+      float[] yMTF = new float[NPointsMTF];
+      if (nf2 < NPointsMTF)
+        NPointsMTF = nf2; 
+      for (int i16 = 0; i16 < NPointsMTF; i16++) {
+        xMTF[i16] = i16 * DeltafMTF;
+        yMTF[i16] = mag[i16] / mag[0];
+      } 
+      IJ.showStatus(Util.getStringMessage("MTF_rebin_calc_message", new Object[] { Float.valueOf(DeltaEuref) }));
+      myProgressBar.setValues(0.95D, Util.getStringMessage("MTF_rebin_calc_message", new Object[] { Float.valueOf(DeltaEuref) }), 600L);
+      float fint = 0.01F / dimPx;
+      int kEuref = 1;
+      int kmediaEuref = 0;
+      float mediaEuref = 0.0F;
+      Vector<Float> vectFreq = new Vector<>();
+      Vector<Float> vectMTF = new Vector<>();
+      mediaEuref = 0.0F;
+      for (int i17 = 0; i17 < NPointsMTF; i17++) {
+        float fbin = kEuref * DeltaEuref;
+        float f1 = xMTF[i17];
+        if (f1 < fint) {
+          mediaEuref += yMTF[i17];
+          kmediaEuref++;
+        } else if (kEuref > 1) {
+          if (f1 >= (kEuref - 1) * DeltaEuref - fint)
+            if ((kEuref - 1) * DeltaEuref - fint <= f1 && f1 < (kEuref - 1) * DeltaEuref + fint) {
+              mediaEuref += yMTF[i17];
+              kmediaEuref++;
+            } else {
+              vectMTF.add(Float.valueOf(mediaEuref / kmediaEuref));
+              vectFreq.add(Float.valueOf((kEuref - 1) * DeltaEuref));
+              kEuref++;
+              kmediaEuref = 0;
+              mediaEuref = 0.0F;
+              mediaEuref += yMTF[i17];
+              kmediaEuref++;
+            }  
+        } else {
+          vectFreq.add(Float.valueOf(0.0F));
+          vectMTF.add(Float.valueOf(mediaEuref / kmediaEuref));
+          kmediaEuref = 0;
+          mediaEuref = 0.0F;
+          kEuref++;
+          mediaEuref += yMTF[i17];
+          kmediaEuref++;
+        } 
+      } 
+      double[] xMTF_025b = new double[vectFreq.size()];
+      double[] yMTF_025b = new double[vectMTF.size()];
+      xMTF_025b = vectFreq.stream().mapToDouble(f -> (f != null) ? f.floatValue() : Double.NaN).toArray();
+      yMTF_025b = vectMTF.stream().mapToDouble(f -> (f != null) ? f.floatValue() : Double.NaN).toArray();
+      for (int i18 = 0; i18 < yMTF_025b.length; i18++)
+        yMTF_025b[i18] = yMTF_025b[i18] / yMTF_025b[0]; 
+      final float[] xMTF_025 = new float[yMTF_025b.length];
+      final float[] yMTF_025 = new float[yMTF_025b.length];
+      for (int i19 = 0; i19 < yMTF_025b.length; i19++) {
+        xMTF_025[i19] = (float)xMTF_025b[i19];
+        yMTF_025[i19] = (float)yMTF_025b[i19];
+      } 
+      IJ.showProgress(6, 6);
+      IJ.showStatus(Util.getStringMessage("MTF_calc_done", new Object[0]));
+      myProgressBar.setValues(1.0D, Util.getStringMessage("MTF_calc_done", new Object[0]), 1000L);
+      final Plot plot4 = new Plot(Util.getStringMessage("MTF_rebin_plot_title", new Object[] { Float.valueOf(DeltaEuref) }), "lp/mm", "pMTF", xMTF_025, yMTF_025);
+      PlotWindow.noGridLines = false;
+      XYChart chart4 = ((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)((XYChartBuilder)(new XYChartBuilder()).width(500)).height(400)).theme(Styler.ChartTheme.XChart)).title(Util.getStringMessage("MTF_rebin_plot_title", new Object[] { Float.valueOf(DeltaEuref) }))).xAxisTitle("spatial frequency [mm).yAxisTitle("pMTF").build();
+      ((XYStyler)chart4.getStyler()).setSeriesColors(new Color[] { mtfColor });
+      ((XYStyler)chart4.getStyler()).setChartBackgroundColor(Color.WHITE);
+      ((XYStyler)chart4.getStyler()).setAxisTitleFont(axisFont);
+      ((XYStyler)chart4.getStyler()).setChartTitleFont(titleFont);
+      ((XYStyler)chart4.getStyler()).setChartTitleBoxBackgroundColor(Color.LIGHT_GRAY);
+      ((XYStyler)chart4.getStyler()).setChartTitleBoxVisible(true);
+      ((XYStyler)chart4.getStyler()).setPlotBorderVisible(false);
+      XYSeries pMTFSeries = chart4.addSeries("pMTF", xMTF_025, yMTF_025);
+      pMTFSeries.setLineWidth(2.0F);
+      pMTFSeries.setMarker(SeriesMarkers.NONE);
+      ((XYStyler)chart4.getStyler()).setDefaultSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
+      XChartPanel chart4Panel = new XChartPanel((Chart)chart4);
+      JFrame plotsFrame = new JFrame("pMTF");
+      WindowManager.addWindow(plotsFrame);
+      plotsFrame.setMinimumSize(new Dimension(1000, 800));
+      JPanel contentResults = new JPanel((LayoutManager)new MigLayout("fillx"));
+      contentResults.add((Component)chart1Panel, "cell 0 0 1 1");
+      contentResults.add((Component)chart2Panel, "cell 1 0 1 1");
+      contentResults.add((Component)chart3Panel, "cell 0 1 1 1");
+      contentResults.add((Component)chart4Panel, "cell 1 1 1 1");
+      plotsFrame.setContentPane(contentResults);
+      plotsFrame.pack();
+      plotsFrame.setLocationRelativeTo((Component)null);
+      plotsFrame.setDefaultCloseOperation(2);
+      plotsFrame.setVisible(true);
+      final float fnyq = (float)(0.5D / dimPx);
+      String[] header = { "spatial frequency [mm, "pMTF" };
+      String[][] data = new String[xMTF_025.length + 4][2];
+      NumberFormat decimalFormatter = new DecimalFormat("0.00");
+      NumberFormat decimalFormatter3 = new DecimalFormat("0.000");
+      int c = 0;
+      float[] arrayOfFloat1;
+      int i20;
+      byte b;
+      for (arrayOfFloat1 = xMTF_025, i20 = arrayOfFloat1.length, b = 0; b < i20; ) {
+        double freq = arrayOfFloat1[b];
+        data[c][0] = decimalFormatter.format(freq);
+        data[c][1] = decimalFormatter3.format(yMTF_025[c]);
+        c++;
+        b++;
+      } 
+      data[c][0] = "Nyquist Freq (mm;
+      data[c][1] = Util.decimalFormatEsak.format(fnyq);
+      data[c + 1][0] = "pMTF;
+      data[c + 1][1] = Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_025, yMTF_025, 0.5F));
+      data[c + 2][0] = "pMTF;
+      data[c + 2][1] = Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_025, yMTF_025, 0.1F));
+      data[c + 3][0] = "pMTF (%) at Nyquist:";
+      data[c + 3][1] = Util.decimalFormatMAs.format((100.0F * Util.MTFValueAt(xMTF_025, yMTF_025, fnyq)));
+      JTextField tf = new JTextField();
+      tf.setEditable(false);
+      tf.setAlignmentX(0.5F);
+      DefaultCellEditor editor = new DefaultCellEditor(tf);
+      final JTable tableResults = new JTable((Object[][])data, (Object[])header);
+      tableResults.setDefaultEditor(Object.class, editor);
+      Font f = new Font("Calibri", 1, 11);
+      JTableHeader headerTable = tableResults.getTableHeader();
+      TableCellRenderer rendererFromHeader = tableResults.getTableHeader().getDefaultRenderer();
+      JLabel headerLabel = (JLabel)rendererFromHeader;
+      headerLabel.setHorizontalAlignment(0);
+      Dimension screen = IJ.getScreenSize();
+      headerTable.setPreferredSize(new Dimension(screen.width / 2, 30));
+      headerTable.setFont(f);
+      JTableUtilities.setCellsAlignment(tableResults, 0);
+      JMenuItem copyItem = new JMenuItem("Copy");
+      JMenuItem exportItem = new JMenuItem("Export to Excel...");
+      exportItem.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent actionEvent) {
+              Util.exportDataToExcel(tableResults);
+            }
+          });
+      ExcelAdapter adapter = new ExcelAdapter(tableResults);
+      copyItem.addActionListener((ActionListener)adapter);
+      JPopupMenu popupMenu = new JPopupMenu();
+      popupMenu.add(copyItem);
+      popupMenu.add(exportItem);
+      tableResults.setComponentPopupMenu(popupMenu);
+      JFrame resultFrame = new JFrame("Results");
+      WindowManager.addWindow(resultFrame);
+      resultFrame.add(new JScrollPane(tableResults));
+      resultFrame.pack();
+      resultFrame.setSize(screen.width / 4, screen.height / 2);
+      resultFrame.setLocationRelativeTo((Component)null);
+      resultFrame.setDefaultCloseOperation(2);
+      myProgressBar.closeDialog();
+      resultFrame.setVisible(true);
+      String msg = "Nyquist Freq (mm" + Util.decimalFormatEsak.format(fnyq) + "\npMTFis " + Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_025, yMTF_025, 0.5F)) + "\npMTF\\ is " + Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_025, yMTF_025, 0.1F)) + " \npMTF (%) at Nyquist is " + Util.decimalFormatMAs.format((100.0F * Util.MTFValueAt(xMTF_025, yMTF_025, fnyq)));
+      JOptionPane.showMessageDialog(null, msg, "pMTF Summary", 1);
+      JFrame frame = new JFrame("Please make a choice...");
+      WindowManager.addWindow(frame);
+      this.contentPane = new JPanel((LayoutManager)new MigLayout("fillx"));
+      JLabel titleLabel = new JLabel("Saving / Averaging... ");
+      titleLabel.setFont(titleLabel.getFont().deriveFont(16.0F));
+      this.contentPane.add(titleLabel, "alignx leading, wrap");
+      JLabel saveLabel = new JLabel("Save the pMTF curve... ");
+      this.contentPane.add(saveLabel, "alignx trailing");
+      JButton save_btn = new JButton("Save pMTF");
+      save_btn.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+              try {
+                ResultsTable rTable = plot4.getResultsTable();
+                String titoloColonna0 = rTable.getColumnHeading(0);
+                String titoloColonna1 = rTable.getColumnHeading(1);
+                rTable.addValue(titoloColonna0, "Nyquist Freq. (1/mm)");
+                rTable.addValue(titoloColonna1, Util.decimalFormatEsak.format(fnyq));
+                rTable.incrementCounter();
+                rTable.addValue(titoloColonna0, "pMTF50:");
+                rTable.addValue(titoloColonna1, Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_025, yMTF_025, 0.5F)));
+                rTable.incrementCounter();
+                rTable.addValue(titoloColonna0, "pMTF10:");
+                rTable.addValue(titoloColonna1, Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_025, yMTF_025, 0.1F)));
+                rTable.incrementCounter();
+                rTable.addValue(titoloColonna0, "pMTF (%) at Nyquist:");
+                rTable.addValue(titoloColonna1, Util.decimalFormatMAs.format((100.0F * Util.MTFValueAt(xMTF_025, yMTF_025, fnyq))));
+                MTF_Edge.this.saveResults(rTable);
+              } catch (IOException ex) {
+                IJ.error("SORRY - SOMETHING GONE WRONG");
+                if (myProgressBar != null)
+                  myProgressBar.closeDialog(); 
+              } 
+            }
+          });
+      this.contentPane.add(save_btn, "alignx leading, wrap");
+      JLabel averLabel = new JLabel("Average the data with previously saved pMTF curve and save the results... ");
+      this.contentPane.add(averLabel, "alignx trailing");
+      JButton average_btn = new JButton("Average with pMTF curve...");
+      average_btn.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+              try {
+                ResultsTable rTable = plot4.getResultsTable();
+                String titoloColonna0 = rTable.getColumnHeading(0);
+                String titoloColonna1 = rTable.getColumnHeading(1);
+                rTable.addValue(titoloColonna0, "Nyquist Freq. (1/mm)");
+                rTable.addValue(titoloColonna1, Util.decimalFormatEsak.format(fnyq));
+                rTable.incrementCounter();
+                rTable.addValue(titoloColonna0, "pMTF50:");
+                rTable.addValue(titoloColonna1, Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_025, yMTF_025, 0.5F)));
+                rTable.incrementCounter();
+                rTable.addValue(titoloColonna0, "pMTF10:");
+                rTable.addValue(titoloColonna1, Util.decimalFormatEsak.format(Util.lpmmValueAt(xMTF_025, yMTF_025, 0.1F)));
+                rTable.incrementCounter();
+                rTable.addValue(titoloColonna0, "pMTF (%) at Nyquist:");
+                rTable.addValue(titoloColonna1, Util.decimalFormatMAs.format((100.0F * Util.MTFValueAt(xMTF_025, yMTF_025, fnyq))));
+                MTF_Edge.this.averageResults(rTable);
+              } catch (IOException ex) {
+                IJ.error("SORRY - SOMETHING GONE WRONG");
+                if (myProgressBar != null)
+                  myProgressBar.closeDialog(); 
+              } 
+            }
+          });
+      this.contentPane.add(average_btn, "alignx leading, wrap");
+      frame.setContentPane(this.contentPane);
+      frame.pack();
+      frame.setLocationRelativeTo((Component)null);
+      frame.setDefaultCloseOperation(2);
+      frame.setVisible(true);
+    } 
+  }
+  
+  public boolean dialogItemChanged(GenericDialog gd, AWTEvent awte) {
+    return Util.validaDialogDose(gd, awte);
+  }
+  
+  private void saveResults(Plot p) throws IOException {
+    ResultsTable rs = p.getResultsTable(true);
+    rs.setHeading(0, "freq");
+    rs.setHeading(1, "pMTF");
+    rs.saveAs("");
+  }
+  
+  private void saveResults(ResultsTable rs) throws IOException {
+    rs.setHeading(0, "freq");
+    rs.setHeading(1, "pMTF");
+    rs.saveAs("");
+  }
+  
+  private void averageResults(ResultsTable newRs) throws IOException {
+    ResultsTable rs = null;
+    JFileChooser fc = new JFileChooser();
+    fc.setDialogTitle("Please select the csv file related to previously saved MTF measurements");
+    fc.setFileSelectionMode(0);
+    fc.setAcceptAllFileFilterUsed(false);
+    fc.setFileFilter(new FileNameExtensionFilter("Comma separated value Files", new String[] { "csv" }));
+    switch (fc.showOpenDialog(this.contentPane)) {
+      case 0:
+        rs = ResultsTable.open2(fc.getSelectedFile().getPath());
+        System.err.println("CIAO");
+        break;
+    } 
+    if (rs != null) {
+      double oldNyquist = rs.getValueAsDouble(1, rs.size() - 4);
+      double oldMTF50 = rs.getValueAsDouble(1, rs.size() - 3);
+      double oldMTF10 = rs.getValueAsDouble(1, rs.size() - 2);
+      double oldMTFNy = rs.getValueAsDouble(1, rs.size() - 1);
+      rs.deleteRows(rs.size() - 4, rs.size() - 1);
+      double[] oldValues = rs.getColumnAsDoubles(1);
+      ResultsTable newResults = newRs;
+      double newNyquist = 0.0D;
+      double newMTF50 = 0.0D;
+      double newMTF10 = 0.0D;
+      double newMTFNy = 0.0D;
+      try {
+        newNyquist = Util.decimalFormatEsak.parse(newResults.getStringValue(1, newResults.size() - 4)).doubleValue();
+        newMTF50 = Util.decimalFormatEsak.parse(newResults.getStringValue(1, newResults.size() - 3)).doubleValue();
+        newMTF10 = Util.decimalFormatEsak.parse(newResults.getStringValue(1, newResults.size() - 2)).doubleValue();
+        newMTFNy = Util.decimalFormatMAs.parse(newResults.getStringValue(1, newResults.size() - 1)).doubleValue();
+      } catch (Exception e) {
+        e.printStackTrace();
+        IJ.error("SOMETHING WRONG...");
+        return;
+      } 
+      newResults.deleteRows(newResults.size() - 4, newResults.size() - 1);
+      double[] newValues = newResults.getColumnAsDoubles(1);
+      if (oldValues.length != newValues.length) {
+        IJ.error("The current pMTF curve has a number of values different\nfrom the previously saved one.\nPlease retry...");
+        return;
+      } 
+      if (oldNyquist != newNyquist) {
+        IJ.error("The Nyquist frequency loaded from file is different\nfrom the previously saved one.\nPlease retry...");
+        return;
+      } 
+      double avgMTF50 = 0.5D * (oldMTF50 + newMTF50);
+      double avgMTF10 = 0.5D * (oldMTF10 + newMTF10);
+      double avgMTFNy = 0.5D * (oldMTFNy + newMTFNy);
+      double[] freq = rs.getColumnAsDoubles(0);
+      ResultsTable rsAvg = new ResultsTable();
+      for (int i = 0; i < oldValues.length; i++) {
+        newValues[i] = (newValues[i] + oldValues[i]) / 2.0D;
+        rsAvg.incrementCounter();
+        rsAvg.addValue("freq", freq[i]);
+        rsAvg.addValue("pMTF", newValues[i]);
+      } 
+      String titoloColonna0 = rsAvg.getColumnHeading(0);
+      String titoloColonna1 = rsAvg.getColumnHeading(1);
+      rsAvg.addValue(titoloColonna0, "Nyquist Freq. (1/mm)");
+      rsAvg.addValue(titoloColonna1, Util.decimalFormatEsak.format(oldNyquist));
+      rsAvg.incrementCounter();
+      rsAvg.addValue(titoloColonna0, "pMTF50:");
+      rsAvg.addValue(titoloColonna1, Util.decimalFormatEsak.format(avgMTF50));
+      rsAvg.incrementCounter();
+      rsAvg.addValue(titoloColonna0, "pMTF10:");
+      rsAvg.addValue(titoloColonna1, Util.decimalFormatEsak.format(avgMTF10));
+      rsAvg.incrementCounter();
+      rsAvg.addValue(titoloColonna0, "pMTF (%) at Nyquist:");
+      rsAvg.addValue(titoloColonna1, Util.decimalFormatMAs.format(avgMTFNy));
+      rsAvg.saveAs("");
+    } 
+  }
+}

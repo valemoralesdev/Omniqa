@@ -1,0 +1,88 @@
+package it.plugins.mammo.mtf;
+
+import ij.IJ;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import javax.swing.GroupLayout;
+import javax.swing.JButton;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.LayoutStyle;
+import manifold.internal.runtime.Bootstrap;
+
+public class Panel_Wire extends JPanel {
+  private JButton buttonHoriz;
+  
+  private JButton buttonOpenMTF;
+  
+  private JButton buttonVertical;
+  
+  private JLabel jLabel1;
+  
+  public Panel_Wire() {
+    initComponents();
+  }
+  
+  static {
+    Bootstrap.init();
+  }
+  
+  private void initComponents() {
+    this.jLabel1 = new JLabel();
+    this.buttonOpenMTF = new JButton();
+    this.buttonHoriz = new JButton();
+    this.buttonVertical = new JButton();
+    this.jLabel1.setText("MTF_WIRE");
+    this.buttonOpenMTF.setText("Open Image for MTF");
+    this.buttonOpenMTF.addActionListener(new ActionListener() {
+          public void actionPerformed(ActionEvent evt) {
+            Panel_Wire.this.buttonOpenMTFActionPerformed(evt);
+          }
+        });
+    this.buttonHoriz.setText("Horizontal Wire");
+    this.buttonVertical.setText("Vertical Wire");
+    GroupLayout layout = new GroupLayout(this);
+    setLayout(layout);
+    layout.setHorizontalGroup(layout
+        .createParallelGroup(GroupLayout.Alignment.LEADING)
+        .addGroup(layout.createSequentialGroup()
+          .addGap(124, 124, 124)
+          .addComponent(this.buttonOpenMTF)
+          .addGap(62, 131, 32767))
+        .addGroup(layout.createSequentialGroup()
+          .addGap(28, 28, 28)
+          .addComponent(this.buttonHoriz)
+          .addPreferredGap(LayoutStyle.ComponentPlacement.RELATED, -1, 32767)
+          .addComponent(this.buttonVertical)
+          .addGap(42, 42, 42))
+        .addGroup(GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+          .addContainerGap(-1, 32767)
+          .addComponent(this.jLabel1)
+          .addGap(170, 170, 170)));
+    layout.setVerticalGroup(layout
+        .createParallelGroup(GroupLayout.Alignment.LEADING)
+        .addGroup(layout.createSequentialGroup()
+          .addContainerGap()
+          .addComponent(this.jLabel1)
+          .addGap(18, 18, 18)
+          .addComponent(this.buttonOpenMTF)
+          .addGap(18, 18, 18)
+          .addGroup(layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            .addComponent(this.buttonHoriz)
+            .addComponent(this.buttonVertical))
+          .addContainerGap(32, 32767)));
+  }
+  
+  private void buttonOpenMTFActionPerformed(ActionEvent evt) {
+    if (evt.getSource() == this.buttonOpenMTF)
+      IJ.run("Open..."); 
+  }
+  
+  public JButton getButtonHoriz() {
+    return this.buttonHoriz;
+  }
+  
+  public JButton getButtonVertical() {
+    return this.buttonVertical;
+  }
+}
