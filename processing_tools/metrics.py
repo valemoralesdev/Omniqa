@@ -193,24 +193,32 @@ def calculate_mtf_npwe(roi: np.ndarray, pixel_pitch: float, orientation: str = "
     # --- 12.5 mm Hann window centred on LSF peak ---
     window_mm = 12.5
     window_samples = int(window_mm / dx)
-    peak_idx = np.argmax(lsf)
+    # Use absolute value to locate the largest magnitude peak but retain
+    # the original LSF polarity for subsequent calculations
+    peak_idx = np.argmax(np.abs(lsf))
     start = max(0, peak_idx - window_samples // 2)
     end = min(len(lsf), start + window_samples)
     lsf_segment = lsf[start:end]
     window = np.hanning(len(lsf_segment))
     lsf_windowed = lsf_segment * window
 
-    # --- FFT and MTF ---
-    freqs = np.fft.fftfreq(len(lsf_windowed), dx)
+    # --- Zero‑padding FFT to match IAEA resolution ---
+    lsf_len = len(lsf_windowed)
+    n_fft = max(2048, 2 ** int(np.ceil(np.log2(lsf_len))))
+    lsf_padded = np.zeros(n_fft)
+    lsf_padded[:lsf_len] = lsf_windowed
+
+    freqs = np.fft.fftfreq(n_fft, dx)
     pos = freqs >= 0
     freqs = freqs[pos]
-    mtf = np.abs(np.fft.fft(lsf_windowed))[pos]
+    mtf = np.abs(np.fft.fft(lsf_padded))[pos]
     if mtf[0] != 0:
         mtf /= mtf[0]
 
-    # --- Rebin to 0.05 mm^-1 ---
+    # --- Rebin to 0.05 mm^-1 up to 10 mm^-1 ---
     freq_step = 0.05
-    freq_rebinned = np.arange(0, freqs[-1] + freq_step, freq_step)
+    max_freq = min(10.0, freqs[-1])
+    freq_rebinned = np.arange(0, max_freq + freq_step, freq_step)
     mtf_rebinned = np.interp(freq_rebinned, freqs, mtf, left=0, right=0)
 
     # --- Interpolate MTF percentages ---
