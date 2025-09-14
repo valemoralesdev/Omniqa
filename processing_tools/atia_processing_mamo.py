@@ -42,7 +42,7 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
             image_array = image_array.astype(np.uint8)
 
             # antes: image_with_rois, rois = segment_and_draw_rois(image_array)
-            image_with_rois, rois = segment_and_draw_rois(image_array, pixel_spacing_mm=pixel_spacing_mm)
+            image_with_rois, rois, angles = segment_and_draw_rois(image_array, pixel_spacing_mm=pixel_spacing_mm)
 
             # === DEBUG: dibujar ROIs (sin duplicar imports) ===
             def save_debug_rois(image, rois, out_path="images/rois_debug.png", angles=None):
@@ -69,7 +69,7 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
                 cv2.imwrite(out_path, img_color)
 
             os.makedirs("images", exist_ok=True)
-            save_debug_rois(image_array, rois, out_path="images/rois_debug.png")
+            save_debug_rois(image_array, rois, out_path="images/rois_debug.png", angles=angles)
 
             # === Normalización para SNR/SDNR/NNPS ===
             x_bg, y_bg, w_bg, h_bg = rois["background_roi"]
@@ -87,7 +87,7 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
                 original_image,
                 roi_horiz,
                 pixel_spacing_mm=pixel_spacing_mm,
-                angle_tilt_deg=-2.43,              # el de IAEA para el borde horizontal
+                angle_tilt_deg=angles.get("roi_vertical", 0.0),
                 super_sampling_factor=10,
                 hann_window_mm=25.0,
                 bin_pitch=0.25,
@@ -106,7 +106,7 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
                 image=roi_v_rot,
                 roi_horizontal_edge=(0, 0, roi_v_rot.shape[1], roi_v_rot.shape[0]),
                 pixel_spacing_mm=pixel_spacing_mm,
-                angle_tilt_deg=(180.0 - 3.91),     # tu decisión: reutilizar horizontal con 176.09°
+                angle_tilt_deg=angles.get("roi_horizontal", 0.0) - 90.0,
                 super_sampling_factor=10,
                 hann_window_mm=25.0,
                 bin_pitch=0.25,
