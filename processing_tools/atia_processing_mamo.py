@@ -19,6 +19,13 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
     def process(self, filepath):
         try:
             dicom_data = pydicom.dcmread(filepath)
+            # después de dicom_data = pydicom.dcmread(filepath)
+            px = dicom_data.get("PixelSpacing", [0.1, 0.1])
+            if isinstance(px, (list, pydicom.multival.MultiValue)) and len(px) >= 1:
+                pixel_spacing_mm = float(px[0])
+            else:
+                pixel_spacing_mm = 0.1  # fallback seguro si el header no lo trae
+
             image_array = dicom_data.pixel_array.astype(np.float32)
             original_image = image_array.copy()
 
@@ -34,38 +41,85 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
             image_array = ((image_array - min_window) / (max_window - min_window)) * 255.0
             image_array = image_array.astype(np.uint8)
 
-            image_with_rois, rois = segment_and_draw_rois(image_array)
-            
+            # antes: image_with_rois, rois = segment_and_draw_rois(image_array)
+            image_with_rois, rois = segment_and_draw_rois(image_array, pixel_spacing_mm=pixel_spacing_mm)
+
+            # === DEBUG: dibujar ROIs (sin duplicar imports) ===
+            def save_debug_rois(image, rois, out_path="images/rois_debug.png", angles=None):
+                import cv2, os
+                img_color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+                colors = {
+                    "attenuator_rois": (255, 0, 255),  # magenta
+                    "background_roi": (0, 255, 255),   # amarillo
+                    "roi_horizontal":  (0, 255, 0),    # verde (borde derecho)
+                    "roi_vertical":    (0, 0, 255),    # rojo  (borde inferior)
+                    "roi_small":       (255, 255, 0),  # celeste
+                }
+                for key, roi in rois.items():
+                    if roi is None:
+                        continue
+                    x, y, w, h = roi
+                    cv2.rectangle(img_color, (x, y), (x+w, y+h), colors.get(key, (255,255,255)), 2)
+                    label = key
+                    if angles and key in angles and angles[key] is not None:
+                        label += f"  θ={angles[key]:.2f}°"
+                    cv2.putText(img_color, label, (x, max(15, y-6)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, colors.get(key, (255,255,255)), 1, cv2.LINE_AA)
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                cv2.imwrite(out_path, img_color)
+
+            os.makedirs("images", exist_ok=True)
+            save_debug_rois(image_array, rois, out_path="images/rois_debug.png")
+
+            # === Normalización para SNR/SDNR/NNPS ===
             x_bg, y_bg, w_bg, h_bg = rois["background_roi"]
             roi_background = original_image[y_bg:y_bg+h_bg, x_bg:x_bg+w_bg]
-            mean_background = np.mean(roi_background)
-            normalized_image = original_image / mean_background
+            mean_background = float(np.mean(roi_background))
+            normalized_image = original_image / (mean_background if mean_background != 0 else 1.0)
 
-            x_sig, y_sig, w_sig, h_sig = rois["roi_small"]
-            roi_signal = original_image[y_sig:y_sig+h_sig, x_sig:x_sig+w_sig]
-    
-            x, y, w, h = rois["roi_horizontal"]
-            roi_horizontal_array = original_image[y:y+h, x:x+w]
-            a, b, c, d = rois["roi_vertical"]
-            roi_vertical_array = original_image[b:b+d, a:a+c]
-
+            # NNPS (opcional)
             roi_background_512 = extract_roi(roi_background, centered=True, size=(512, 512))
             calculate_nnps(roi_background_512, save_csv=True, csv_filename="nnps_output.csv")
-                # --- Calcular MTFs ---
-            # Si querés usar un ángulo fijo de 2.5°
-            
-            freqs_h, mtf_h, mtf_vals_h = calcular_mtf_desde_roi((x, y, w, h), original_image, pixel_spacing=0.1, super_sampling_factor=4)
-            freqs_v, mtf_v, mtf_vals_v = calcular_mtf_desde_roi((a, b, c, d), original_image, pixel_spacing=0.1, super_sampling_factor=4)
+
+            # === pMTF H (borde INFERIOR): usar función horizontal tal como la tenés ===
+            roi_horiz = rois["roi_vertical"]  # borde inferior
+            f_grid_h, pmtf_h, metrics_h, debug_h = pmft_horizontal_iaea_like(
+                original_image,
+                roi_horiz,
+                pixel_spacing_mm=pixel_spacing_mm,
+                angle_tilt_deg=-2.43,              # el de IAEA para el borde horizontal
+                super_sampling_factor=10,
+                hann_window_mm=25.0,
+                bin_pitch=0.25,
+                out_png="images/pMTF_horizontal_debug.png",
+                smooth_esf="median5",
+                smooth_pmtf=False
+            )
+            print("=== MÉTRICAS H (IAEA-like) ==="); print(metrics_h)
+
+            # === pMTF V (borde DERECHO): reutilizar horizontal ROTANDO 90° y con ángulo 180-3.91 ===
+            x, y, w, h = rois["roi_horizontal"]
+            roi_v = original_image[y:y+h, x:x+w]
+            roi_v_rot = np.rot90(roi_v, k=1)  # 90° CCW
+
+            f_v, p_v, met_v, dbg_v = pmft_horizontal_iaea_like(
+                image=roi_v_rot,
+                roi_horizontal_edge=(0, 0, roi_v_rot.shape[1], roi_v_rot.shape[0]),
+                pixel_spacing_mm=pixel_spacing_mm,
+                angle_tilt_deg=(180.0 - 3.91),     # tu decisión: reutilizar horizontal con 176.09°
+                super_sampling_factor=10,
+                hann_window_mm=25.0,
+                bin_pitch=0.25,
+                out_png="images/pMTF_vertical_debug.png",
+                smooth_esf="median5",
+                smooth_pmtf=False
+            )
+            print("=== MÉTRICAS V (IAEA-like) ==="); print(met_v)
+
 
 
             os.makedirs("images", exist_ok=True)
 
-            d1 = calculate_dprime(freqs_h, mtf_h, freqs_v, mtf_v, roi_background, roi_signal)
-
-            print(f"\n🔍 Índice de detectabilidad (d'):")
-            for key, value in d1.items():
-                print(f"  {key}: {value}")
-                
             def round_decimal(value, decimals=2):
                 q = Decimal("1." + "0" * decimals)  # Ej: Decimal('1.00') para dos decimales
                 return Decimal(float(value)).quantize(q, rounding=ROUND_HALF_UP)
@@ -82,9 +136,7 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
             metrics = {
                 "snr_signal": float(round_decimal(calculate_snr(normalized_image, rois["background_roi"]))),
                 "sdnr": float(round_decimal(calculate_sdnr(normalized_image, rois["roi_small"], rois["background_roi"]))),
-                "pixel_spacing_mm": 0.1,
-                "mtf_horizontal": mtf_vals_h,
-                "mtf_vertical": mtf_vals_v,
+                "pixel_spacing_mm": pixel_spacing_mm,
             }
 
             import json

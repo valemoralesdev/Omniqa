@@ -80,26 +80,116 @@ def generate_centered_mtf_rois(main_roi, image_shape, size_v=(80, 160), size_h=(
 
     return roi_h, roi_v
 
-def segment_and_draw_rois(image):
+def segment_and_draw_rois(image, pixel_spacing_mm):
+    """
+    Genera ROIs estilo IAEA (40x40 mm) y los re-centra para que el borde
+    quede exactamente en el centro (half-in/half-out) usando la recta del borde.
+    """
     attenuator_rois = detect_attenuators(image)
     if len(attenuator_rois) < 2:
         return image, {}
 
-    roi_small = segment_small_roi(image, attenuator_rois) #atenuador rois ordena los rois atenuadores del más chico al más grande
-    roi_main = attenuator_rois[-1]
+    roi_small = segment_small_roi(image, attenuator_rois)  # aluminio (el más chico)
+    roi_main  = attenuator_rois[-1]                        # cobre (el más grande)
     roi_background = define_background_roi(roi_main, image.shape)
-    roi_h, roi_v = generate_centered_mtf_rois(roi_main, image.shape, size_v=(300, 500), size_h=(500, 300))
+
+    # ROIs 40x40 mm sobre bordes derecho (H) e inferior (V)
+    roi_h, roi_v = generate_centered_mtf_rois_mm(
+        roi_main, image.shape, pixel_spacing_mm, size_mm=(40.0, 40.0)
+    )
+
+    # === Re-centrado geométrico por recta del borde (mejor que gradiente) ===
+    roi_h = recenter_roi_to_edge(image, roi_h, max_shift_px=6)
+    roi_v = recenter_roi_to_edge(image, roi_v, max_shift_px=6)
+    # =======================================================================
 
     roi_dict = {
-        "attenuator_rois": roi_main, #roi de cobre
+        "attenuator_rois": roi_main,
         "background_roi": roi_background,
-        "roi_horizontal": roi_h,
-        "roi_vertical": roi_v,
-        "roi_small": roi_small #roi de aluminio
+        "roi_horizontal": roi_h,  # borde derecho (evalúa MTF horizontal)
+        "roi_vertical": roi_v,    # borde inferior (evalúa MTF vertical)
+        "roi_small": roi_small
     }
 
+    # Dibujar AFTER re-centrar
     all_rois = [roi_main, roi_background, roi_h, roi_v, roi_small]
-    colors = [(255, 0, 255), (0, 255, 255), (0, 255, 0), (0, 0, 255), (0, 255, 0)]
+    colors   = [(255, 0, 255), (0, 255, 255), (0, 255, 0), (0, 0, 255), (0, 255, 0)]
     drawn = draw_rois(image, all_rois, colors)
 
     return drawn, roi_dict
+
+
+# --- Ya lo tenés, lo dejo aquí por claridad ---
+def generate_centered_mtf_rois_mm(main_roi, image_shape, pixel_spacing_mm, size_mm=(40.0, 40.0)):
+    """
+    ROIs estilo IAEA:
+    - 40x40 mm por defecto (size_mm).
+    - Centrados sobre los bordes 'útiles' del atenuador: derecho (horizontal) e inferior (vertical).
+    - Mitad adentro / mitad afuera del borde.
+    """
+    x, y, w, h = main_roi
+    H, W = image_shape[:2]
+
+    w_px = int(round(size_mm[0] / pixel_spacing_mm))
+    h_px = int(round(size_mm[1] / pixel_spacing_mm))
+
+    # ROI vertical (borde inferior)
+    rv_x = x + w // 2 - w_px // 2
+    rv_y = y + h - h_px // 2
+    roi_v = (max(0, rv_x), max(0, rv_y), w_px, h_px)
+
+    # ROI horizontal (borde derecho)
+    rh_x = x + w - w_px // 2
+    rh_y = y + h // 2 - h_px // 2
+    roi_h = (max(0, rh_x), max(0, rh_y), w_px, h_px)
+
+    return roi_h, roi_v
+
+
+import numpy as np
+import cv2
+
+def recenter_roi_to_edge(image, roi, max_shift_px=6):
+    """
+    Re-centra el ROI para que la recta del borde pase por el centro del ROI.
+    - Detecta borde por Canny dentro del ROI, ajusta y = m x + b.
+    - Calcula la distancia ortogonal del centro del ROI a la recta.
+    - Desplaza el ROI a lo largo de la normal hasta anular esa distancia.
+    """
+    x, y, w, h = roi
+    sub = image[y:y+h, x:x+w].astype(np.float32)
+
+    # Edge detection robusto en 8 bits (mejor Canny)
+    u8 = cv2.normalize(sub, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    edges = cv2.Canny(u8, 40, 120)
+
+    ys, xs = np.where(edges > 0)
+    if xs.size < 30:
+        # Sin bordes detectables: no toco el ROI
+        return roi
+
+    # Ajuste de recta y = m x + b en coords locales del ROI
+    m, b = np.polyfit(xs.astype(np.float64), ys.astype(np.float64), 1)
+
+    # Distancia ortogonal (con signo) del centro del ROI a la recta
+    cx, cy = w / 2.0, h / 2.0
+    denom = np.sqrt(m * m + 1.0)
+    d = (-m * cx + cy - b) / denom  # en píxeles
+
+    # Vector normal unitario a la recta (en coords de imagen local)
+    nx, ny = -m / denom, 1.0 / denom
+
+    # Desplazamiento requerido para que el borde pase por el centro
+    shift_x = -d * nx
+    shift_y = -d * ny
+
+    # Limitar y redondear a píxeles enteros
+    shift_x = int(np.clip(np.round(shift_x), -max_shift_px, max_shift_px))
+    shift_y = int(np.clip(np.round(shift_y), -max_shift_px, max_shift_px))
+
+    # Aplicar desplazamiento en coords de imagen global, con clamping a bordes
+    xx = int(np.clip(x + shift_x, 0, image.shape[1] - w))
+    yy = int(np.clip(y + shift_y, 0, image.shape[0] - h))
+
+    return (xx, yy, w, h)
+

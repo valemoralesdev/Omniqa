@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 # Ruta al archivo DICOM que querés testear
-dicom_path = "images/test.dcm"
+dicom_path = "images/MG000002.dcm"
 
 # Leer metadata
 dicom = pydicom.dcmread(dicom_path)
