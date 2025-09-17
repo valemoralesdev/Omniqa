@@ -87,7 +87,7 @@ def segment_and_draw_rois(image, pixel_spacing_mm):
     """
     attenuator_rois = detect_attenuators(image)
     if len(attenuator_rois) < 2:
-        return image, {}, {}
+        return image, {}
 
     roi_small = segment_small_roi(image, attenuator_rois)  # aluminio (el más chico)
     roi_main  = attenuator_rois[-1]                        # cobre (el más grande)
@@ -99,9 +99,8 @@ def segment_and_draw_rois(image, pixel_spacing_mm):
     )
 
     # === Re-centrado geométrico por recta del borde (mejor que gradiente) ===
-    roi_h, ang_h = recenter_roi_to_edge(image, roi_h, max_shift_px=6)
-    roi_v, ang_v = recenter_roi_to_edge(image, roi_v, max_shift_px=6)
-    angles = {"roi_horizontal": ang_h, "roi_vertical": ang_v}
+    roi_h = recenter_roi_to_edge(image, roi_h, max_shift_px=6)
+    roi_v = recenter_roi_to_edge(image, roi_v, max_shift_px=6)
     # =======================================================================
 
     roi_dict = {
@@ -117,7 +116,7 @@ def segment_and_draw_rois(image, pixel_spacing_mm):
     colors   = [(255, 0, 255), (0, 255, 255), (0, 255, 0), (0, 0, 255), (0, 255, 0)]
     drawn = draw_rois(image, all_rois, colors)
 
-    return drawn, roi_dict, angles
+    return drawn, roi_dict
 
 
 # --- Ya lo tenés, lo dejo aquí por claridad ---
@@ -167,11 +166,10 @@ def recenter_roi_to_edge(image, roi, max_shift_px=6):
     ys, xs = np.where(edges > 0)
     if xs.size < 30:
         # Sin bordes detectables: no toco el ROI
-        return roi, None
+        return roi
 
     # Ajuste de recta y = m x + b en coords locales del ROI
     m, b = np.polyfit(xs.astype(np.float64), ys.astype(np.float64), 1)
-    angle_deg = float(np.degrees(np.arctan(m)))
 
     # Distancia ortogonal (con signo) del centro del ROI a la recta
     cx, cy = w / 2.0, h / 2.0
@@ -193,5 +191,4 @@ def recenter_roi_to_edge(image, roi, max_shift_px=6):
     xx = int(np.clip(x + shift_x, 0, image.shape[1] - w))
     yy = int(np.clip(y + shift_y, 0, image.shape[0] - h))
 
-    return (xx, yy, w, h), angle_deg
-
+    return (xx, yy, w, h)

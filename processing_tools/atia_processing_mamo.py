@@ -19,32 +19,35 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
     def process(self, filepath):
         try:
             dicom_data = pydicom.dcmread(filepath)
-            # después de dicom_data = pydicom.dcmread(filepath)
+
+            # Pixel spacing (mm/pixel)
             px = dicom_data.get("PixelSpacing", [0.1, 0.1])
             if isinstance(px, (list, pydicom.multival.MultiValue)) and len(px) >= 1:
                 pixel_spacing_mm = float(px[0])
             else:
-                pixel_spacing_mm = 0.1  # fallback seguro si el header no lo trae
+                pixel_spacing_mm = 0.1  # fallback si el header no lo trae
 
             image_array = dicom_data.pixel_array.astype(np.float32)
             original_image = image_array.copy()
 
+            # Windowing
             window_center = dicom_data.get("WindowCenter", np.median(image_array))
             window_width = dicom_data.get("WindowWidth", np.max(image_array) - np.min(image_array))
             if isinstance(window_center, (list, pydicom.multival.MultiValue)):
                 window_center = float(window_center[0])
             if isinstance(window_width, (list, pydicom.multival.MultiValue)):
                 window_width = float(window_width[0])
+
             min_window = window_center - (window_width / 2)
             max_window = window_center + (window_width / 2)
             image_array = np.clip(image_array, min_window, max_window)
             image_array = ((image_array - min_window) / (max_window - min_window)) * 255.0
             image_array = image_array.astype(np.uint8)
 
-            # antes: image_with_rois, rois = segment_and_draw_rois(image_array)
-            image_with_rois, rois, angles = segment_and_draw_rois(image_array, pixel_spacing_mm=pixel_spacing_mm)
+            # Segmentación y ROIs con spacing
+            image_with_rois, rois = segment_and_draw_rois(image_array, pixel_spacing_mm=pixel_spacing_mm)
 
-            # === DEBUG: dibujar ROIs (sin duplicar imports) ===
+            # === DEBUG: dibujar ROIs ===
             def save_debug_rois(image, rois, out_path="images/rois_debug.png", angles=None):
                 import cv2, os
                 img_color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
@@ -59,17 +62,19 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
                     if roi is None:
                         continue
                     x, y, w, h = roi
-                    cv2.rectangle(img_color, (x, y), (x+w, y+h), colors.get(key, (255,255,255)), 2)
+                    cv2.rectangle(img_color, (x, y), (x+w, y+h), colors.get(key, (255, 255, 255)), 2)
                     label = key
                     if angles and key in angles and angles[key] is not None:
                         label += f"  θ={angles[key]:.2f}°"
-                    cv2.putText(img_color, label, (x, max(15, y-6)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, colors.get(key, (255,255,255)), 1, cv2.LINE_AA)
+                    cv2.putText(
+                        img_color, label, (x, max(15, y-6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, colors.get(key, (255, 255, 255)), 1, cv2.LINE_AA
+                    )
                 os.makedirs(os.path.dirname(out_path), exist_ok=True)
                 cv2.imwrite(out_path, img_color)
 
             os.makedirs("images", exist_ok=True)
-            save_debug_rois(image_array, rois, out_path="images/rois_debug.png", angles=angles)
+            save_debug_rois(image_array, rois, out_path="images/rois_debug.png")
 
             # === Normalización para SNR/SDNR/NNPS ===
             x_bg, y_bg, w_bg, h_bg = rois["background_roi"]
@@ -81,55 +86,47 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
             roi_background_512 = extract_roi(roi_background, centered=True, size=(512, 512))
             calculate_nnps(roi_background_512, save_csv=True, csv_filename="nnps_output.csv")
 
-            # === pMTF H (borde INFERIOR): usar función horizontal tal como la tenés ===
-            roi_horiz = rois["roi_vertical"]  # borde inferior
-            f_grid_h, pmtf_h, metrics_h, debug_h = pmft_horizontal_iaea_like(
-                original_image,
-                roi_horiz,
-                pixel_spacing_mm=pixel_spacing_mm,
-                angle_tilt_deg=angles.get("roi_vertical", 0.0),
-                super_sampling_factor=10,
-                hann_window_mm=25.0,
-                bin_pitch=0.25,
-                out_png="images/pMTF_horizontal_debug.png",
-                smooth_esf="median5",
-                smooth_pmtf=False
-            )
-            print("=== MÉTRICAS H (IAEA-like) ==="); print(metrics_h)
+            # === H: borde INFERIOR (usa roi_vertical)
+            roi_horiz = rois["roi_vertical"]
+            detH = detect_angle_in_horizontal_roi(original_image, roi_horiz, sigma=1.0)
+            angle_h_deg = detH["angle_deg"]
 
-            # === pMTF V (borde DERECHO): reutilizar horizontal ROTANDO 90° y con ángulo 180-3.91 ===
+            f_grid_h, pmtf_h, metrics_h, debug_h = pmft_horizontal_iaea_like(
+                original_image, roi_horiz,
+                pixel_spacing_mm=pixel_spacing_mm,
+                angle_tilt_deg=angle_h_deg,
+                super_sampling_factor=10, hann_window_mm=25.0, bin_pitch=0.25,
+                out_png="images/pMTF_horizontal_debug.png",
+                smooth_esf="median5", smooth_pmtf=False
+            )
+
+            # === V: borde DERECHO (usa roi_horizontal; rotamos 90° para reutilizar)
             x, y, w, h = rois["roi_horizontal"]
-            roi_v = original_image[y:y+h, x:x+w]
-            roi_v_rot = np.rot90(roi_v, k=1)  # 90° CCW
+            detV = detect_angle_in_vertical_roi(original_image, (x, y, w, h), sigma=1.0)
+            angle_v_deg_vertical_convention = detV["angle_deg"]  # 0° = vertical
+
+            roi_v_rot = np.rot90(original_image[y:y+h, x:x+w], k=1)
 
             f_v, p_v, met_v, dbg_v = pmft_horizontal_iaea_like(
                 image=roi_v_rot,
                 roi_horizontal_edge=(0, 0, roi_v_rot.shape[1], roi_v_rot.shape[0]),
                 pixel_spacing_mm=pixel_spacing_mm,
-                angle_tilt_deg=angles.get("roi_horizontal", 0.0) - 90.0,
-                super_sampling_factor=10,
-                hann_window_mm=25.0,
-                bin_pitch=0.25,
+                angle_tilt_deg=-angle_v_deg_vertical_convention,
+                super_sampling_factor=10, hann_window_mm=25.0, bin_pitch=0.25,
                 out_png="images/pMTF_vertical_debug.png",
-                smooth_esf="median5",
-                smooth_pmtf=False
+                smooth_esf="median5", smooth_pmtf=False
             )
-            print("=== MÉTRICAS V (IAEA-like) ==="); print(met_v)
 
 
-
-            os.makedirs("images", exist_ok=True)
-
+            # Utilidad para redondeo
             def round_decimal(value, decimals=2):
-                q = Decimal("1." + "0" * decimals)  # Ej: Decimal('1.00') para dos decimales
+                q = Decimal("1." + "0" * decimals)  # p.ej., Decimal('1.00') para dos decimales
                 return Decimal(float(value)).quantize(q, rounding=ROUND_HALF_UP)
-            
-                        # Obtener campos DICOM
-            study_date = dicom_data.get("StudyDate", "")         # '20240524'
-            study_time = dicom_data.get("StudyTime", "000000")   # '163052'
 
-            # Normalizar y combinar
-            study_datetime_str = study_date + study_time[:6]     # '20240524163052'
+            # Obtener campos DICOM (fecha y hora de estudio)
+            study_date = dicom_data.get("StudyDate", "")         # 'YYYYMMDD'
+            study_time = dicom_data.get("StudyTime", "000000")   # 'HHMMSS'
+            study_datetime_str = study_date + study_time[:6]     # 'YYYYMMDDHHMMSS'
             fecha = datetime.strptime(study_datetime_str, "%Y%m%d%H%M%S")
 
             # Calcular métricas finales
@@ -137,14 +134,16 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
                 "snr_signal": float(round_decimal(calculate_snr(normalized_image, rois["background_roi"]))),
                 "sdnr": float(round_decimal(calculate_sdnr(normalized_image, rois["roi_small"], rois["background_roi"]))),
                 "pixel_spacing_mm": pixel_spacing_mm,
+                # Ejemplo: podrías agregar algunas de pMTF si lo deseas:
+                # "mtf10_h": metrics_h.get("MTF10", None),
+                # "mtf10_v": met_v.get("MTF10", None),
             }
 
             import json
-
             with open("images/metrics.json", "w") as f:
                 json.dump(metrics, f, indent=4)
 
-            # Guardar en MongoDB sin duplicar
+            # Guardar en MongoDB (upsert por SOPInstanceUID)
             try:
                 documento = {
                     "sop_instance_uid": dicom_data.SOPInstanceUID,
@@ -159,19 +158,17 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
                 db = client["quality_control"]
                 collection = db["results"]
                 collection.create_index("sop_instance_uid", unique=True)
-                
-                # Insertar solo si no existe, o actualizar si ya está
+
                 collection.update_one(
-                    {"sop_instance_uid": documento["sop_instance_uid"]},  # criterio único
+                    {"sop_instance_uid": documento["sop_instance_uid"]},
                     {"$set": documento},
                     upsert=True
                 )
-
                 print("✅ Documento actualizado/insertado en MongoDB.")
             except Exception as mongo_error:
                 print("❌ Error guardando en MongoDB:", mongo_error)
 
-
+            # Resultado
             return {
                 "image": image_with_rois,
                 "rois": rois,
@@ -181,5 +178,3 @@ class AtiaProcessingMamo(ProcessingAlgorithm):
         except Exception as e:
             print(f"❌ Error en ATIA Processing Mamo: {e}")
             return {"image": None, "rois": {}, "metrics": {}}
-        
-

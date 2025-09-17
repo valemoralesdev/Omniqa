@@ -304,3 +304,79 @@ def pmft_horizontal_iaea_like(
     }
     return f_grid, pmtf_r, metrics, debug
 
+# === metrics.py (REEMPLAZO de detectores) ======================
+import numpy as np
+from sklearn.linear_model import LinearRegression, RANSACRegressor
+from scipy.ndimage import gaussian_filter1d
+
+def _parabolic_subpixel(y_vals, i):
+    if i <= 0 or i >= len(y_vals)-1:
+        return float(i)
+    y0, y1, y2 = y_vals[i-1], y_vals[i], y_vals[i+1]
+    denom = (y0 - 2*y1 + y2)
+    if denom == 0:
+        return float(i)
+    return i + 0.5 * (y0 - y2) / denom
+
+def detect_angle_in_horizontal_roi(image, roi, use_subpixel=True, ransac=True, sigma=1.0):
+    """
+    ROI con borde casi HORIZONTAL (borde INFERIOR).
+    Para cada columna: suavizo -> gradiente vertical |dI/dy| -> índice del máximo -> y(x).
+    Ajusto y = a*x + b;  ángulo = atan(a). Convención: 0° = horizontal perfecta.
+    """
+    x, y, w, h = roi
+    xs, ys = [], []
+    for c in range(x, x+w):
+        col = image[y:y+h, c].astype(np.float64)
+        if sigma and sigma > 0:
+            col = gaussian_filter1d(col, sigma=sigma)
+        g = np.abs(np.gradient(col))       # |dI/dy|
+        i = int(np.argmax(g))
+        if use_subpixel and 0 < i < h-1:
+            i = _parabolic_subpixel(g, i)
+        xs.append(c)
+        ys.append(y + i)
+
+    X = np.array(xs).reshape(-1,1)
+    Y = np.array(ys)
+    model = RANSACRegressor(LinearRegression(), min_samples=0.6, residual_threshold=1.0, random_state=0) if ransac else LinearRegression()
+    model.fit(X, Y)
+    a = float(model.estimator_.coef_[0]) if ransac else float(model.coef_[0])
+    b = float(model.estimator_.intercept_) if ransac else float(model.intercept_)
+    Yp = model.predict(X)
+    rmse = float(np.sqrt(np.mean((Y - Yp)**2)))
+    inliers = int(np.sum(model.inlier_mask_)) if ransac else len(Y)
+    angle_deg = float(np.degrees(np.arctan(a)))
+    return {"angle_deg": angle_deg, "slope": a, "intercept": b, "rmse_px": rmse, "n": len(Y), "inliers": inliers}
+
+def detect_angle_in_vertical_roi(image, roi, use_subpixel=True, ransac=True, sigma=1.0):
+    """
+    ROI con borde casi VERTICAL (borde DERECHO).
+    Para cada fila: suavizo -> gradiente horizontal |dI/dx| -> índice del máximo -> x(y).
+    Ajusto x = a*y + b;  ángulo = atan(a). Convención: 0° = vertical perfecta.
+    """
+    x, y, w, h = roi
+    xs, ys = [], []
+    for r in range(y, y+h):
+        row = image[r, x:x+w].astype(np.float64)
+        if sigma and sigma > 0:
+            row = gaussian_filter1d(row, sigma=sigma)
+        g = np.abs(np.gradient(row))       # |dI/dx|
+        i = int(np.argmax(g))
+        if use_subpixel and 0 < i < w-1:
+            i = _parabolic_subpixel(g, i)
+        xs.append(x + i)
+        ys.append(r)
+
+    X = np.array(ys).reshape(-1,1)
+    Y = np.array(xs)
+    model = RANSACRegressor(LinearRegression(), min_samples=0.6, residual_threshold=1.0, random_state=0) if ransac else LinearRegression()
+    model.fit(X, Y)
+    a = float(model.estimator_.coef_[0]) if ransac else float(model.coef_[0])
+    b = float(model.estimator_.intercept_) if ransac else float(model.intercept_)
+    Yp = model.predict(X)
+    rmse = float(np.sqrt(np.mean((Y - Yp)**2)))
+    inliers = int(np.sum(model.inlier_mask_)) if ransac else len(Y)
+    angle_deg = float(np.degrees(np.arctan(a)))
+    return {"angle_deg": angle_deg, "slope": a, "intercept": b, "rmse_px": rmse, "n": len(Y), "inliers": inliers}
+# ================================================================
